@@ -35,10 +35,11 @@ JOIN_TO_CREATE_CHANNEL_ID = 1434472477379137557  # Replace with your “Join to 
 TEMP_VC_CATEGORY_ID = 1434472420277882961  # Optional: Category ID for temp VCs
 USER_LIMIT = 8  # Limit per temp VC
 temp_channels = {}
+
 # -----------------------------
 # DO NOT EDIT BELOW THIS LINE UNLESS CUSTOMIZING BEHAVIOR
 # -----------------------------
-
+keep_alive()
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -468,6 +469,7 @@ async def on_ready():
         status=discord.Status.online
     )
 bot.run(DISCORD_TOKEN)
+
 
 
 
