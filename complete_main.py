@@ -34,6 +34,7 @@ WELCOME_CHANNEL_ID = 1405216479787614287
 JOIN_TO_CREATE_CHANNEL_ID = 1434472477379137557  # Replace with your “Join to Create” channel ID
 TEMP_VC_CATEGORY_ID = 1434472420277882961  # Optional: Category ID for temp VCs
 USER_LIMIT = 8  # Limit per temp VC
+temp_channels = {}
 # -----------------------------
 # DO NOT EDIT BELOW THIS LINE UNLESS CUSTOMIZING BEHAVIOR
 # -----------------------------
@@ -510,6 +511,7 @@ if __name__ == "__main__":
 
     # start flask website
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
 
 
 
