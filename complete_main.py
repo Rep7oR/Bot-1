@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import random
 import math
 import time
-
+from server import keep_alive
 # -----------------------------
 # MAIN CONFIG - EDIT BELOW
 # -----------------------------
@@ -468,6 +468,7 @@ async def on_ready():
         status=discord.Status.online
     )
 bot.run(DISCORD_TOKEN)
+
 
 
 
