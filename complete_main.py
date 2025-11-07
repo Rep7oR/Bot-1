@@ -125,36 +125,43 @@ async def get_member_role(guild):
 
 
 async def ensure_role(guild, game_name):
+    # 1) If stored, fetch by ID
     role_id = game_roles.get(game_name)
     role = guild.get_role(role_id) if role_id else None
 
-    if role:
-        return role
+    # 2) If missing, search by name in server
+    if not role:
+        role = discord.utils.get(guild.roles, name=game_name)
 
-    # Find target anchor role
-    member_role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
-    if not member_role:
-        print(f"⚠ Member role '{MEMBER_ROLE_NAME}' not found!")
-        base_position = 1
-    else:
-        base_position = member_role.position
+        # If found, store it so we don’t lose track
+        if role:
+            game_roles[game_name] = role.id
 
-    perms = discord.Permissions(view_channel=True)
+    # 3) If still not found → create new role
+    if not role:
+        member_role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
+        if not member_role:
+            print(f"⚠ Member role '{MEMBER_ROLE_NAME}' not found!")
+            base_position = 1
+        else:
+            base_position = member_role.position
 
-    # Create role
-    role = await guild.create_role(
-        name=game_name,
-        colour=random_colour(),
-        permissions=perms,
-        mentionable=True,
-        reason="Temporary game role"
-    )
+        perms = discord.Permissions(view_channel=True)
 
-    # Force place directly ABOVE Member, regardless of lower roles
-    await role.edit(position=base_position, hoist=True)
+        role = await guild.create_role(
+            name=game_name,
+            colour=random_colour(),
+            permissions=perms,
+            mentionable=True,
+            reason="Temporary game role"
+        )
 
-    game_roles[game_name] = role.id
-    print(f"✅ Game role '{game_name}' placed above Member at pos {base_position}")
+        # Move above Member
+        await role.edit(position=base_position, hoist=True)
+
+        print(f"✅ Created '{game_name}' above Member at {role.position}")
+
+        game_roles[game_name] = role.id
 
     return role
 
@@ -507,6 +514,7 @@ async def on_ready():
         status=discord.Status.online
     )
 bot.run(DISCORD_TOKEN)
+
 
 
 
