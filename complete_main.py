@@ -110,7 +110,10 @@ class InviteView(discord.ui.View):
                 "I couldn’t DM you — please check your privacy settings (Allow DMs from server members).",
                 ephemeral=True
             )
-
+            
+MEMBER_ROLE_NAME = "Members"   # change if needed
+game_roles = {}   # game_name → role_id
+SCAN_INTERVAL = 10   # seconds
 def random_colour():
     return discord.Colour.from_rgb(
         random.randint(0,255),
@@ -179,10 +182,6 @@ async def cleanup_empty_roles(guild):
 
         game_roles.pop(game_name, None)
 
-
-
-
-
 async def scan_activities():
     for guild in bot.guilds:
 
@@ -232,6 +231,7 @@ async def scan_activities():
 @tasks.loop(seconds=SCAN_INTERVAL)
 async def poll_games():
     await scan_activities()
+    
 @bot.event
 async def on_member_join(member):
     member_join_times[member.id] = datetime.utcnow()
@@ -594,6 +594,7 @@ async def on_ready():
         status=discord.Status.online
     )
 bot.run(DISCORD_TOKEN)
+
 
 
 
