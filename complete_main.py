@@ -151,7 +151,8 @@ async def ensure_role(guild, game_name):
     )
 
     # Force place directly ABOVE Member, regardless of lower roles
-    await role.edit(position=base_position, hoist=True)
+    await role.edit(position=member_role.position + 1, hoist=True)
+
 
     game_roles[game_name] = role.id
     print(f"✅ Game role '{game_name}' placed above Member at pos {base_position}")
@@ -507,6 +508,7 @@ async def on_ready():
         status=discord.Status.online
     )
 bot.run(DISCORD_TOKEN)
+
 
 
 
