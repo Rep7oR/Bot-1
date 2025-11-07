@@ -41,6 +41,10 @@ temp_channels = {}
 # -----------------------------
 keep_alive()
 load_dotenv()
+MEMBER_ROLE_NAME = "Members"   # change if needed
+game_roles = {}   # game_name → role_id
+SCAN_INTERVAL = 10   # seconds
+
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
@@ -107,7 +111,127 @@ class InviteView(discord.ui.View):
                 ephemeral=True
             )
 
+def random_colour():
+    return discord.Colour.from_rgb(
+        random.randint(0,255),
+        random.randint(0,255),
+        random.randint(0,255)
+    )
 
+
+async def get_member_role(guild):
+    return discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
+
+
+async def ensure_role(guild, game_name):
+    role_id = game_roles.get(game_name)
+    role = guild.get_role(role_id) if role_id else None
+
+    if role:
+        return role
+
+    # Find Member role
+    member_role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
+
+    # If not found, fallback to bottom
+    base_position = member_role.position if member_role else 1
+
+    # Minimum permission required for hoist to work
+    perms = discord.Permissions(view_channel=True)
+
+    # Create role
+    role = await guild.create_role(
+        name=game_name,
+        colour=random_colour(),
+        permissions=perms,
+        mentionable=True,
+        reason="Temporary game role"
+    )
+
+    # Move to right above Member role
+    await role.edit(position=base_position + 1, hoist=True)
+
+    game_roles[game_name] = role.id
+    print(f"✅ Created '{game_name}' above Member at {role.position}")
+
+    return role
+
+async def cleanup_empty_roles(guild):
+    """Remove game roles if no one is playing."""
+    to_delete = []
+
+    for game_name, role_id in list(game_roles.items()):
+        role = guild.get_role(role_id)
+        if role is None:
+            del game_roles[game_name]
+            continue
+
+        # If nobody has this role → schedule delete
+        if len(role.members) == 0:
+            to_delete.append((game_name, role))
+
+    for game_name, role in to_delete:
+        try:
+            await role.delete(reason="No members playing this game")
+            print(f"🗑️ Deleted role → {game_name}")
+        except Exception as e:
+            print(f"❌ Failed to delete role {role.name} → {e}")
+
+        game_roles.pop(game_name, None)
+
+
+
+
+
+async def scan_activities():
+    for guild in bot.guilds:
+
+        playing_map = {}  # game_name → [members]
+
+        # —
+        # 1) Detect who is playing
+        # —
+        for member in guild.members:
+            if member.bot:
+                continue
+
+            for act in member.activities:
+                if act and act.name:
+                    playing_map.setdefault(act.name, []).append(member)
+
+        # —
+        # 2) Assign + remove
+        # —
+        for game_name, members in playing_map.items():
+            role = await ensure_role(guild, game_name)
+
+            # Add missing
+            for m in members:
+                if role not in m.roles:
+                    await m.add_roles(role)
+
+        # Remove roles from users NOT playing
+        for game_name, role_id in list(game_roles.items()):
+            role = guild.get_role(role_id)
+            if not role:
+                continue
+
+            for member in role.members:
+                # If member no longer playing this game → remove
+                playing_games = {a.name for a in member.activities if a and a.name}
+                if role.name not in playing_games:
+                    await member.remove_roles(role)
+
+        # —
+        # 3) Cleanup
+        # —
+        await cleanup_empty_roles(guild)
+
+
+
+@tasks.loop(seconds=SCAN_INTERVAL)
+async def poll_games():
+    await scan_activities()
 @bot.event
 async def on_member_join(member):
     member_join_times[member.id] = datetime.utcnow()
@@ -461,6 +585,7 @@ async def post_invite(ctx):
 @bot.event
 async def on_ready():
     print(f"Bot online as {bot.user}")
+    poll_games.start()
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.watching,
@@ -469,6 +594,7 @@ async def on_ready():
         status=discord.Status.online
     )
 bot.run(DISCORD_TOKEN)
+
 
 
 
