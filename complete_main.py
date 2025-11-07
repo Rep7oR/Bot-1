@@ -123,41 +123,38 @@ def random_colour():
 async def get_member_role(guild):
     return discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
 
-
 async def ensure_role(guild, game_name):
+    # First check cache by ID
     role_id = game_roles.get(game_name)
     role = guild.get_role(role_id) if role_id else None
 
-    if role:
-        return role
+    # If no valid cached role, search by name
+    if role is None:
+        role = discord.utils.get(guild.roles, name=game_name)
 
-    # Find target anchor role
-    member_role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
-    if not member_role:
-        print(f"⚠ Member role '{MEMBER_ROLE_NAME}' not found!")
-        base_position = 1
+    # If still none → create
+    if role is None:
+        member_role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
+        base_pos = member_role.position if member_role else 1
+
+        role = await guild.create_role(
+            name=game_name,
+            colour=random_colour(),
+            permissions=discord.Permissions(view_channel=True),
+            mentionable=True,
+            reason="Temporary game role"
+        )
+
+        await role.edit(position=base_pos + 1, hoist=True)
+        print(f"✅ Created game role '{game_name}' above Member")
     else:
-        base_position = member_role.position
+        print(f"♻ Reusing existing role '{game_name}'")
 
-    perms = discord.Permissions(view_channel=True)
-
-    # Create role
-    role = await guild.create_role(
-        name=game_name,
-        colour=random_colour(),
-        permissions=perms,
-        mentionable=True,
-        reason="Temporary game role"
-    )
-
-    # Force place directly ABOVE Member, regardless of lower roles
-    await role.edit(position=member_role.position + 1, hoist=True)
-
-
+    # Store ID in cache
     game_roles[game_name] = role.id
-    print(f"✅ Game role '{game_name}' placed above Member at pos {base_position}")
 
     return role
+
 
 
 async def cleanup_empty_roles(guild):
@@ -508,6 +505,7 @@ async def on_ready():
         status=discord.Status.online
     )
 bot.run(DISCORD_TOKEN)
+
 
 
 
