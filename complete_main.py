@@ -39,7 +39,7 @@ temp_channels = {}
 # -----------------------------
 # DO NOT EDIT BELOW THIS LINE UNLESS CUSTOMIZING BEHAVIOR
 # -----------------------------
-keep_alive()
+
 load_dotenv()
 
 
@@ -498,6 +498,7 @@ async def poll_games():
 async def on_ready():
     print(f"Bot online as {bot.user}")
     poll_games.start()
+    keep_alive()
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.watching,
@@ -506,6 +507,7 @@ async def on_ready():
         status=discord.Status.online
     )
 bot.run(DISCORD_TOKEN)
+
 
 
 
