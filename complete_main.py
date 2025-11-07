@@ -398,96 +398,7 @@ async def on_raw_reaction_remove(payload):
 
 
 
-active_sessions = {}
-recent_starts = {}
-recent_ends = {}
-DEBOUNCE_SECONDS = 10
-DELETE_AFTER_SECONDS = 60
 
-@bot.event
-async def on_presence_update(before: discord.Member, after: discord.Member):
-    if after.bot:
-        return
-    channel = bot.get_channel(CHANNEL_ID)
-    if not channel:
-        return
-    current_activities = {a.name for a in after.activities if a and a.name}
-    previous_activities = {a.name for a in before.activities if a and a.name} if before else set()
-    new_games = current_activities - previous_activities
-    for new_game in new_games:
-        if not (after.id in active_sessions and active_sessions[after.id][0] == new_game):
-            await handle_game_start(after, channel, new_game)
-    ended_games = previous_activities - current_activities
-    for ended_game in ended_games:
-        await handle_game_end(after, channel, ended_game)
-
-async def handle_game_start(member, channel, game_name):
-    now_ts = time.time()
-    last_start = recent_starts.get(member.id, 0)
-    if now_ts - last_start < DEBOUNCE_SECONDS:
-        return
-    if member.id in active_sessions and active_sessions[member.id][0] == game_name:
-        return
-    recent_starts[member.id] = now_ts
-    embed = discord.Embed(
-        title="🎮 Game Session Started",
-        description=f"**{member.display_name}** is now playing",
-        color=0x00ff00
-    )
-    embed.add_field(name="Game", value=f"**{game_name}**", inline=True)
-    embed.add_field(name="Started", value=f"<t:{int(datetime.now(timezone.utc).timestamp())}:R>", inline=True)
-    embed.set_thumbnail(url=member.display_avatar.url)
-    msg = await channel.send(embed=embed,delete_after=DELETE_AFTER_SECONDS)
-    active_sessions[member.id] = (game_name, datetime.now(timezone.utc))
-
-async def handle_game_end(member, channel, game_name):
-    now_ts = time.time()
-    last_end = recent_ends.get(member.id, 0)
-    if now_ts - last_end < DEBOUNCE_SECONDS:
-        return
-    if member.id not in active_sessions:
-        return
-    session_game, start_time = active_sessions[member.id]
-    if session_game != game_name:
-        return
-    recent_ends[member.id] = now_ts
-    del active_sessions[member.id]
-    duration = datetime.now(timezone.utc) - start_time
-    hours, remainder = divmod(duration.total_seconds(), 3600)
-    minutes, seconds = divmod(remainder, 60)
-    duration_str = ""
-    if hours >= 1:
-        duration_str += f"{int(hours)}h "
-    if minutes >= 1 or hours >= 1:
-        duration_str += f"{int(minutes)}m "
-    duration_str += f"{int(seconds)}s"
-    embed = discord.Embed(
-        title="⏹️ Game Session Ended",
-        description=f"**{member.display_name}** has finished playing",
-        color=0xff0000
-    )
-    embed.add_field(name="Game", value=f"**{game_name}**", inline=True)
-    embed.add_field(name="Duration", value=duration_str, inline=True)
-    embed.add_field(
-        name="Session Time",
-        value=f"<t:{int(start_time.timestamp())}:t> → <t:{int(datetime.now(timezone.utc).timestamp())}:t>",
-        inline=False
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    msg = await channel.send(embed=embed,delete_after=DELETE_AFTER_SECONDS)
-
-
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.send("You don't have permission to use that command.")
-    elif isinstance(error, commands.BotMissingPermissions):
-        await ctx.send("I don't have the required permissions to do that.")
-    elif isinstance(error, commands.CommandInvokeError):
-        await ctx.send(f"Command raised an error: {error.original}")
-        raise error
-    else:
-        await ctx.send(f"Command error: {error}")
 
 # ---------- CATEGORY 4: Custom Welcome DM ----------
 WELCOME_MESSAGE = """Welcome to **{server}**! 🎉
@@ -590,11 +501,12 @@ async def on_ready():
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.watching,
-            name="over the community"
+            name=" Watching the community"
         ),
         status=discord.Status.online
     )
 bot.run(DISCORD_TOKEN)
+
 
 
 
