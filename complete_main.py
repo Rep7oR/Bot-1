@@ -131,13 +131,14 @@ async def ensure_role(guild, game_name):
     if role:
         return role
 
-    # Find Member role
+    # Find target anchor role
     member_role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
+    if not member_role:
+        print(f"⚠ Member role '{MEMBER_ROLE_NAME}' not found!")
+        base_position = 1
+    else:
+        base_position = member_role.position
 
-    # If not found, fallback to bottom
-    base_position = member_role.position if member_role else 1
-
-    # Minimum permission required for hoist to work
     perms = discord.Permissions(view_channel=True)
 
     # Create role
@@ -149,13 +150,14 @@ async def ensure_role(guild, game_name):
         reason="Temporary game role"
     )
 
-    # Move to right above Member role
-    await role.edit(position=base_position + 1, hoist=True)
+    # Force place directly ABOVE Member, regardless of lower roles
+    await role.edit(position=base_position, hoist=True)
 
     game_roles[game_name] = role.id
-    print(f"✅ Created '{game_name}' above Member at {role.position}")
+    print(f"✅ Game role '{game_name}' placed above Member at pos {base_position}")
 
     return role
+
 
 async def cleanup_empty_roles(guild):
     """Remove game roles if no one is playing."""
@@ -593,6 +595,7 @@ async def on_ready():
         status=discord.Status.online
     )
 bot.run(DISCORD_TOKEN)
+
 
 
 
