@@ -109,7 +109,7 @@ class InviteView(discord.ui.View):
                 ephemeral=True
             )
             
-MEMBER_ROLE_NAME = "Members"   # change if needed
+MEMBER_ROLE_NAME = "Member"   # change if needed
 game_roles = {}   # game_name → role_id
 SCAN_INTERVAL = 10   # seconds
 def random_colour():
@@ -506,6 +506,7 @@ async def on_ready():
         status=discord.Status.online
     )
 bot.run(DISCORD_TOKEN)
+
 
 
 
