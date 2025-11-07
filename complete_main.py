@@ -41,9 +41,7 @@ temp_channels = {}
 # -----------------------------
 keep_alive()
 load_dotenv()
-MEMBER_ROLE_NAME = "Members"   # change if needed
-game_roles = {}   # game_name → role_id
-SCAN_INTERVAL = 10   # seconds
+
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -228,9 +226,7 @@ async def scan_activities():
 
 
 
-@tasks.loop(seconds=SCAN_INTERVAL)
-async def poll_games():
-    await scan_activities()
+
     
 @bot.event
 async def on_member_join(member):
@@ -580,7 +576,10 @@ async def post_invite(ctx):
         embed.set_thumbnail(url=ctx.guild.icon.url)
     view = InviteView(invite.url)
     await ctx.send(embed=embed, view=view)
-
+    
+@tasks.loop(seconds=SCAN_INTERVAL)
+async def poll_games():
+    await scan_activities()
 # ---------- CATEGORY 6: Bot Startup ----------
 @bot.event
 async def on_ready():
@@ -594,6 +593,7 @@ async def on_ready():
         status=discord.Status.online
     )
 bot.run(DISCORD_TOKEN)
+
 
 
 
