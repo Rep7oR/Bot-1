@@ -187,9 +187,7 @@ async def on_ready():
 
     print(f"Bot online as {bot.user}")
 
-    # Prevent the loop from being started multiple times
-    if not poll_games.is_running():
-        poll_games.start()
+   
 
     keep_alive()
 
