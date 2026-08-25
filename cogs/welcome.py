@@ -6,28 +6,57 @@ import os
 
 
 # =========================================================
-# CONFIGURATION FILE
+# CONFIGURATION
 # =========================================================
 
 CONFIG_FILE = "welcome_config.json"
 
+# Moderator role names
+# Add your actual moderator role name here if different.
+MODERATOR_ROLE_NAMES = [
+    "MODERATOR",
+    "Moderators",
+    "Mod",
+]
+
+
+# =========================================================
+# LOAD / SAVE CONFIGURATION
+# =========================================================
 
 def load_config():
-    """Load saved welcome channel settings."""
     if not os.path.exists(CONFIG_FILE):
         return {}
 
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
+
     except (json.JSONDecodeError, FileNotFoundError):
         return {}
 
 
 def save_config(config):
-    """Save welcome channel settings."""
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4)
+
+
+# =========================================================
+# RULES BUTTON
+# =========================================================
+
+class RulesView(discord.ui.View):
+
+    def __init__(self, rules_url):
+        super().__init__(timeout=None)
+
+        self.add_item(
+            discord.ui.Button(
+                label="📖 Read the Rules",
+                style=discord.ButtonStyle.link,
+                url=rules_url
+            )
+        )
 
 
 # =========================================================
@@ -49,7 +78,7 @@ class Welcome(commands.Cog):
         description="Set up the welcome message channel."
     )
     @app_commands.describe(
-        channel="Select the channel for welcome messages."
+        channel="Select the channel where new members will be welcomed."
     )
     @app_commands.checks.has_permissions(administrator=True)
     async def setupwelcome(
@@ -67,31 +96,25 @@ class Welcome(commands.Cog):
             )
             return
 
-        # Save channel for this server
+        # Save welcome channel
         self.config[str(guild.id)] = {
             "channel_id": channel.id
         }
 
         save_config(self.config)
 
-        # =================================================
-        # CREATE PREVIEW
-        # =================================================
-
+        # Create preview
         embed = self.create_welcome_embed(
-            guild=guild,
-            member=interaction.user
+            guild,
+            interaction.user
         )
 
-        # Send confirmation
         await interaction.response.send_message(
             f"✅ Welcome system has been set up in {channel.mention}.",
             ephemeral=True
         )
 
-        # Send preview to selected channel
         try:
-
             await channel.send(
                 embed=embed
             )
@@ -99,20 +122,13 @@ class Welcome(commands.Cog):
         except discord.Forbidden:
 
             await interaction.followup.send(
-                f"⚠️ I saved the channel, but I don't have permission "
-                f"to send messages in {channel.mention}.",
-                ephemeral=True
-            )
-
-        except discord.HTTPException as e:
-
-            await interaction.followup.send(
-                f"❌ Discord returned an error: `{e}`",
+                f"⚠️ I saved the channel, but I cannot send "
+                f"messages in {channel.mention}.",
                 ephemeral=True
             )
 
     # =====================================================
-    # CREATE WELCOME EMBED
+    # PUBLIC WELCOME EMBED
     # =====================================================
 
     def create_welcome_embed(
@@ -121,31 +137,28 @@ class Welcome(commands.Cog):
         member: discord.Member
     ):
 
-        # -------------------------------------------------
-        # Automatically detect server information
-        # -------------------------------------------------
-
         server_name = guild.name
-        server_icon = guild.icon.url if guild.icon else None
-
-        # -------------------------------------------------
-        # Find general channel automatically
-        # -------------------------------------------------
+        server_icon = (
+            guild.icon.url
+            if guild.icon
+            else None
+        )
 
         general_channel = self.get_general_channel(guild)
 
         if general_channel:
+
             general_text = (
-                f"Start in {general_channel.mention} and say hi!"
-            )
-        else:
-            general_text = (
-                "Take a look around and say hi to the community!"
+                f"Start in {general_channel.mention} "
+                "and say hi!"
             )
 
-        # -------------------------------------------------
-        # Create embed
-        # -------------------------------------------------
+        else:
+
+            general_text = (
+                "Take a look around and say hi "
+                "to the community!"
+            )
 
         embed = discord.Embed(
             title=f"👋 Welcome to {server_name}!",
@@ -159,18 +172,12 @@ class Welcome(commands.Cog):
             color=discord.Color.blurple()
         )
 
-        # -------------------------------------------------
-        # Member profile picture
-        # -------------------------------------------------
-
+        # Member avatar
         embed.set_thumbnail(
             url=member.display_avatar.url
         )
 
-        # -------------------------------------------------
         # Member information
-        # -------------------------------------------------
-
         embed.add_field(
             name="👤 New Member",
             value=(
@@ -180,19 +187,14 @@ class Welcome(commands.Cog):
             inline=True
         )
 
-        # -------------------------------------------------
-        # Join time
-        # -------------------------------------------------
-
+        # Joined time
         if member.joined_at:
 
-            joined_timestamp = int(
+            timestamp = int(
                 member.joined_at.timestamp()
             )
 
-            joined_text = (
-                f"<t:{joined_timestamp}:R>"
-            )
+            joined_text = f"<t:{timestamp}:R>"
 
         else:
 
@@ -204,20 +206,14 @@ class Welcome(commands.Cog):
             inline=True
         )
 
-        # -------------------------------------------------
-        # Total members
-        # -------------------------------------------------
-
+        # Total server members
         embed.add_field(
             name="👥 Members",
             value=f"**{guild.member_count:,}**",
             inline=True
         )
 
-        # -------------------------------------------------
         # Community information
-        # -------------------------------------------------
-
         embed.add_field(
             name="🎮 Community",
             value=(
@@ -228,10 +224,7 @@ class Welcome(commands.Cog):
             inline=False
         )
 
-        # -------------------------------------------------
         # Footer
-        # -------------------------------------------------
-
         embed.set_footer(
             text=f"{server_name} • Welcome to the community",
             icon_url=server_icon
@@ -240,24 +233,218 @@ class Welcome(commands.Cog):
         return embed
 
     # =====================================================
-    # FIND GENERAL CHANNEL
+    # PRIVATE DM TO NEW MEMBER
     # =====================================================
 
-    def get_general_channel(self, guild):
+    async def send_welcome_dm(
+        self,
+        member: discord.Member
+    ):
 
-        # Look for general-chat
-        for channel in guild.text_channels:
+        guild = member.guild
 
-            if channel.name.lower() == "general-chat":
-                return channel
+        server_name = guild.name
 
-        # Look for general
-        for channel in guild.text_channels:
+        server_icon = (
+            guild.icon.url
+            if guild.icon
+            else None
+        )
 
-            if channel.name.lower() == "general":
-                return channel
+        # =================================================
+        # FIND RULES CHANNEL
+        # =================================================
 
-        return None
+        rules_channel = self.get_rules_channel(guild)
+
+        if rules_channel:
+
+            rules_url = (
+                f"https://discord.com/channels/"
+                f"{guild.id}/"
+                f"{rules_channel.id}"
+            )
+
+            rules_button = RulesView(rules_url)
+
+            rules_text = (
+                f"Please take a moment to read "
+                f"the rules in {rules_channel.mention} "
+                "before participating in the server."
+            )
+
+        else:
+
+            rules_button = None
+
+            rules_text = (
+                "Please make sure you read the server "
+                "rules before participating."
+            )
+
+        # =================================================
+        # FIND MODERATORS
+        # =================================================
+
+        moderators = self.get_moderators(guild)
+
+        total_moderators = len(moderators)
+
+        # =================================================
+        # MODERATOR LIST
+        # =================================================
+
+        if moderators:
+
+            moderator_lines = []
+
+            for moderator in moderators:
+
+                # Status
+                if moderator.status == discord.Status.online:
+                    status = "🟢 Online"
+
+                elif moderator.status == discord.Status.idle:
+                    status = "🌙 Idle"
+
+                elif moderator.status == discord.Status.dnd:
+                    status = "⛔ DND"
+
+                else:
+                    status = "⚫ Offline"
+
+                moderator_lines.append(
+                    f"**{moderator.display_name}** "
+                    f"{moderator.mention}\n"
+                    f"{status}"
+                )
+
+            moderator_text = "\n\n".join(
+                moderator_lines
+            )
+
+        else:
+
+            moderator_text = (
+                "No moderators are currently configured."
+            )
+
+        # =================================================
+        # CREATE DM EMBED
+        # =================================================
+
+        embed = discord.Embed(
+            title=f"👋 Welcome to {server_name}!",
+            description=(
+                f"Hi {member.mention}!\n\n"
+                f"Welcome to **{server_name}**. "
+                "We're happy to have you here!\n\n"
+                "🎮 Join the gaming conversations\n"
+                "🔥 Follow the live streams\n"
+                "🏆 Take part in community events\n\n"
+                f"📖 **Before you get started**\n"
+                f"{rules_text}"
+            ),
+            color=discord.Color.blurple()
+        )
+
+        # Server logo
+        if server_icon:
+            embed.set_thumbnail(
+                url=server_icon
+            )
+
+        # =================================================
+        # SERVER INFORMATION
+        # =================================================
+
+        embed.add_field(
+            name="🏠 Server",
+            value=server_name,
+            inline=True
+        )
+
+        embed.add_field(
+            name="👥 Members",
+            value=f"{guild.member_count:,}",
+            inline=True
+        )
+
+        embed.add_field(
+            name="🛡️ Moderators",
+            value=f"**{total_moderators}**",
+            inline=True
+        )
+
+        # =================================================
+        # MODERATOR HELP
+        # =================================================
+
+        embed.add_field(
+            name="🆘 Need Help?",
+            value=(
+                "You can reach out to one of our "
+                "moderators below.\n\n"
+                f"{moderator_text}"
+            ),
+            inline=False
+        )
+
+        # =================================================
+        # FOOTER
+        # =================================================
+
+        embed.set_footer(
+            text=(
+                f"{server_name} • "
+                f"{total_moderators} Moderators"
+            ),
+            icon_url=server_icon
+        )
+
+        # =================================================
+        # SEND DM
+        # =================================================
+
+        try:
+
+            if rules_button:
+
+                await member.send(
+                    embed=embed,
+                    view=rules_button
+                )
+
+            else:
+
+                await member.send(
+                    embed=embed
+                )
+
+            print(
+                f"✅ Welcome DM sent to "
+                f"{member} in {server_name}"
+            )
+
+            return True
+
+        except discord.Forbidden:
+
+            print(
+                f"⚠️ Could not DM {member}. "
+                "Their DMs may be disabled."
+            )
+
+            return False
+
+        except discord.HTTPException as e:
+
+            print(
+                f"❌ Discord error while DMing "
+                f"{member}: {e}"
+            )
+
+            return False
 
     # =====================================================
     # MEMBER JOIN EVENT
@@ -269,87 +456,149 @@ class Welcome(commands.Cog):
         member: discord.Member
     ):
 
-        # Don't welcome bots
+        # Ignore bots
         if member.bot:
             return
 
         guild = member.guild
 
-        # -------------------------------------------------
-        # Check configuration
-        # -------------------------------------------------
+        # =================================================
+        # PUBLIC WELCOME
+        # =================================================
 
         guild_config = self.config.get(
             str(guild.id)
         )
 
-        if not guild_config:
-            return
+        if guild_config:
 
-        channel_id = guild_config.get(
-            "channel_id"
-        )
-
-        if not channel_id:
-            return
-
-        # -------------------------------------------------
-        # Find welcome channel
-        # -------------------------------------------------
-
-        channel = guild.get_channel(
-            channel_id
-        )
-
-        if channel is None:
-
-            print(
-                f"⚠️ Welcome channel no longer exists "
-                f"in {guild.name}"
+            channel_id = guild_config.get(
+                "channel_id"
             )
 
-            return
+            channel = guild.get_channel(
+                channel_id
+            )
 
-        # -------------------------------------------------
-        # Create welcome embed
-        # -------------------------------------------------
+            if channel:
 
-        embed = self.create_welcome_embed(
-            guild=guild,
-            member=member
-        )
-
-        # -------------------------------------------------
-        # Send welcome message
-        # -------------------------------------------------
-
-        try:
-
-            await channel.send(
-                content=f"👋 Welcome {member.mention}!",
-                embed=embed,
-                allowed_mentions=discord.AllowedMentions(
-                    users=True
+                embed = self.create_welcome_embed(
+                    guild,
+                    member
                 )
+
+                try:
+
+                    await channel.send(
+                        content=f"👋 Welcome {member.mention}!",
+                        embed=embed,
+                        allowed_mentions=discord.AllowedMentions(
+                            users=True
+                        )
+                    )
+
+                    print(
+                        f"✅ Public welcome sent for "
+                        f"{member} in {guild.name}"
+                    )
+
+                except discord.Forbidden:
+
+                    print(
+                        f"❌ Cannot send welcome message "
+                        f"in #{channel.name}"
+                    )
+
+                except discord.HTTPException as e:
+
+                    print(
+                        f"❌ Discord error: {e}"
+                    )
+
+        # =================================================
+        # PRIVATE WELCOME DM
+        # =================================================
+
+        await self.send_welcome_dm(
+            member
+        )
+
+    # =====================================================
+    # GET MODERATORS
+    # =====================================================
+
+    def get_moderators(
+        self,
+        guild: discord.Guild
+    ):
+
+        moderators = []
+
+        for member in guild.members:
+
+            # Don't include bots
+            if member.bot:
+                continue
+
+            # Check moderator roles
+            is_moderator = any(
+                role.name in MODERATOR_ROLE_NAMES
+                for role in member.roles
             )
 
-            print(
-                f"✅ Welcome message sent for "
-                f"{member} in {guild.name}"
-            )
+            if is_moderator:
+                moderators.append(member)
 
-        except discord.Forbidden:
+        return moderators
 
-            print(
-                f"❌ No permission to send welcome message "
-                f"in #{channel.name}"
-            )
+    # =====================================================
+    # FIND RULES CHANNEL
+    # =====================================================
 
-        except discord.HTTPException as e:
+    def get_rules_channel(
+        self,
+        guild: discord.Guild
+    ):
 
-            print(
-                f"❌ Discord error while sending welcome: {e}"
-            )
+        # Discord's official rules channel
+        if guild.rules_channel:
+            return guild.rules_channel
+
+        # Look for common rules channel names
+        rules_names = [
+            "rules",
+            "server-rules",
+            "rules-and-info",
+            "rules-info"
+        ]
+
+        for channel in guild.text_channels:
+
+            if channel.name.lower() in rules_names:
+                return channel
+
+        return None
+
+    # =====================================================
+    # FIND GENERAL CHANNEL
+    # =====================================================
+
+    def get_general_channel(
+        self,
+        guild: discord.Guild
+    ):
+
+        general_names = [
+            "general-chat",
+            "general"
+        ]
+
+        for channel in guild.text_channels:
+
+            if channel.name.lower() in general_names:
+                return channel
+
+        return None
 
     # =====================================================
     # /WELCOME STATUS
@@ -357,9 +606,11 @@ class Welcome(commands.Cog):
 
     @app_commands.command(
         name="welcomestatus",
-        description="Check the current welcome system settings."
+        description="Check the welcome system configuration."
     )
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.checks.has_permissions(
+        administrator=True
+    )
     async def welcomestatus(
         self,
         interaction: discord.Interaction
@@ -368,54 +619,60 @@ class Welcome(commands.Cog):
         guild = interaction.guild
 
         if guild is None:
-
             await interaction.response.send_message(
                 "❌ This command can only be used inside a server.",
                 ephemeral=True
             )
-
             return
 
         guild_config = self.config.get(
             str(guild.id)
         )
 
-        # Not configured
         if not guild_config:
 
             await interaction.response.send_message(
                 "❌ Welcome system is not configured.\n\n"
-                "Use `/setupwelcome` to set it up.",
+                "Use `/setupwelcome` first.",
                 ephemeral=True
             )
 
             return
-
-        channel_id = guild_config.get(
-            "channel_id"
-        )
 
         channel = guild.get_channel(
-            channel_id
+            guild_config.get("channel_id")
         )
 
-        # Channel deleted
-        if channel is None:
+        rules_channel = self.get_rules_channel(
+            guild
+        )
 
-            await interaction.response.send_message(
-                "⚠️ The configured welcome channel no longer exists.\n\n"
-                "Please run `/setupwelcome` again.",
-                ephemeral=True
-            )
+        moderators = self.get_moderators(
+            guild
+        )
 
-            return
+        if channel:
 
-        # Everything OK
+            channel_text = channel.mention
+
+        else:
+
+            channel_text = "❌ Channel no longer exists"
+
+        if rules_channel:
+
+            rules_text = rules_channel.mention
+
+        else:
+
+            rules_text = "❌ Rules channel not found"
+
         await interaction.response.send_message(
-            f"✅ **Welcome System Active**\n\n"
-            f"📢 Channel: {channel.mention}\n"
-            f"👥 Server: **{guild.name}**\n"
-            f"👤 Members: **{guild.member_count:,}**",
+            f"### 👋 Welcome System\n\n"
+            f"📢 **Welcome Channel:** {channel_text}\n"
+            f"📖 **Rules Channel:** {rules_text}\n"
+            f"🛡️ **Moderators:** {len(moderators)}\n"
+            f"👥 **Members:** {guild.member_count:,}",
             ephemeral=True
         )
 
@@ -425,9 +682,11 @@ class Welcome(commands.Cog):
 
     @app_commands.command(
         name="disablewelcome",
-        description="Disable the welcome message system."
+        description="Disable the welcome system."
     )
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.checks.has_permissions(
+        administrator=True
+    )
     async def disablewelcome(
         self,
         interaction: discord.Interaction
@@ -436,12 +695,10 @@ class Welcome(commands.Cog):
         guild = interaction.guild
 
         if guild is None:
-
             await interaction.response.send_message(
                 "❌ This command can only be used inside a server.",
                 ephemeral=True
             )
-
             return
 
         guild_id = str(guild.id)
@@ -455,18 +712,17 @@ class Welcome(commands.Cog):
 
             return
 
-        # Remove server configuration
         del self.config[guild_id]
 
         save_config(self.config)
 
         await interaction.response.send_message(
-            "✅ Welcome messages have been disabled.",
+            "✅ Welcome system has been disabled.",
             ephemeral=True
         )
 
     # =====================================================
-    # ERROR HANDLER
+    # ERROR HANDLERS
     # =====================================================
 
     @setupwelcome.error
@@ -483,7 +739,7 @@ class Welcome(commands.Cog):
 
             message = (
                 "❌ You need **Administrator** permission "
-                "to use `/setupwelcome`."
+                "to use this command."
             )
 
             if interaction.response.is_done():
