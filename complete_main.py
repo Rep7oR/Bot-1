@@ -48,23 +48,23 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 
-member_join_times = {}  # {member_id: datetime}
-def is_member_online(guild):
-    member_role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
-    if not member_role:
-        return False
-    for member in member_role.members:
-        if member.status != discord.Status.offline:
-            return True
-    return False
+# member_join_times = {}  # {member_id: datetime}
+# def is_member_online(guild):
+#     member_role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
+#     if not member_role:
+#         return False
+#     for member in member_role.members:
+#         if member.status != discord.Status.offline:
+#             return True
+#     return False
 
-def format_role_members(members):
-    lines = []
-    for member in members:
-        profile_link = f"https://discord.com/users/{member.id}"
-        name = member.display_name
-        lines.append(f"[{name}]({profile_link})")
-    return "\n".join(lines) if lines else "No members found."
+# def format_role_members(members):
+#     lines = []
+#     for member in members:
+#         profile_link = f"https://discord.com/users/{member.id}"
+#         name = member.display_name
+#         lines.append(f"[{name}]({profile_link})")
+#     return "\n".join(lines) if lines else "No members found."
 
 
             
@@ -74,60 +74,60 @@ def format_role_members(members):
 
     
 
-@bot.event
-async def on_voice_state_update(member, before, after):
-    guild = member.guild
+# @bot.event
+# async def on_voice_state_update(member, before, after):
+#     guild = member.guild
 
-    # --- 1️⃣ When someone joins the Join-to-Create channel ---
-    if after.channel and after.channel.id == JOIN_TO_CREATE_CHANNEL_ID:
-        category = guild.get_channel(TEMP_VC_CATEGORY_ID) if TEMP_VC_CATEGORY_ID else None
+#     # --- 1️⃣ When someone joins the Join-to-Create channel ---
+#     if after.channel and after.channel.id == JOIN_TO_CREATE_CHANNEL_ID:
+#         category = guild.get_channel(TEMP_VC_CATEGORY_ID) if TEMP_VC_CATEGORY_ID else None
 
-        # Create a temp VC with proper permissions
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(
-                connect=True,
-                speak=True,
-                stream=True,
-                view_channel=True,
-                use_voice_activation=True,
-            ),
-            member: discord.PermissionOverwrite(
-                manage_channels=True,  # can rename channel
-                move_members=True,     # can kick users from VC
-                mute_members=True,     # can mute
-                deafen_members=True,   # can deafen
-                connect=True,
-                speak=True,
-                stream=True,
-                view_channel=True,
-                use_voice_activation=True,
-            ),
-        }
+#         # Create a temp VC with proper permissions
+#         overwrites = {
+#             guild.default_role: discord.PermissionOverwrite(
+#                 connect=True,
+#                 speak=True,
+#                 stream=True,
+#                 view_channel=True,
+#                 use_voice_activation=True,
+#             ),
+#             member: discord.PermissionOverwrite(
+#                 manage_channels=True,  # can rename channel
+#                 move_members=True,     # can kick users from VC
+#                 mute_members=True,     # can mute
+#                 deafen_members=True,   # can deafen
+#                 connect=True,
+#                 speak=True,
+#                 stream=True,
+#                 view_channel=True,
+#                 use_voice_activation=True,
+#             ),
+#         }
 
-        temp_vc = await guild.create_voice_channel(
-            name=f"{member.display_name}'s Room 🎮",
-            category=category,
-            user_limit=USER_LIMIT,
-            overwrites=overwrites,
-        )
+#         temp_vc = await guild.create_voice_channel(
+#             name=f"{member.display_name}'s Room 🎮",
+#             category=category,
+#             user_limit=USER_LIMIT,
+#             overwrites=overwrites,
+#         )
 
-        # Move user into the new VC
-        await member.move_to(temp_vc)
+#         # Move user into the new VC
+#         await member.move_to(temp_vc)
 
-        # Save temp VC info
-        temp_channels[temp_vc.id] = {
-            "owner_id": member.id,
-            "guild_id": guild.id,
-        }
+#         # Save temp VC info
+#         temp_channels[temp_vc.id] = {
+#             "owner_id": member.id,
+#             "guild_id": guild.id,
+#         }
 
-        print(f"🎧 Created temp VC for {member.display_name}: {temp_vc.name}")
+#         print(f"🎧 Created temp VC for {member.display_name}: {temp_vc.name}")
 
-    # --- 2️⃣ Delete empty temp VCs automatically ---
-    if before.channel and before.channel.id in temp_channels:
-        if len(before.channel.members) == 0:
-            await before.channel.delete()
-            del temp_channels[before.channel.id]
-            print(f"🗑️ Deleted empty temp VC: {before.channel.name}")
+#     # --- 2️⃣ Delete empty temp VCs automatically ---
+#     if before.channel and before.channel.id in temp_channels:
+#         if len(before.channel.members) == 0:
+#             await before.channel.delete()
+#             del temp_channels[before.channel.id]
+#             print(f"🗑️ Deleted empty temp VC: {before.channel.name}")
 
 
 
