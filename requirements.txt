@@ -8,3 +8,5 @@ flask
 gunicorn
 yt-dlp
 PyNaCl
+davey
+discord.py[voice]
