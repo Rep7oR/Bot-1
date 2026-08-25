@@ -21,7 +21,7 @@ TICKETS_FILE = "help_tickets.json"
 # =========================================================
 
 MODERATOR_ROLE_NAMES = [
-    "Moderator",
+    "MODERATOR",
     "Moderators",
     "Mod",
 ]
