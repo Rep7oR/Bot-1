@@ -11,7 +11,7 @@ from discord import app_commands, ui
 MODERATOR_ROLE_NAME = "MODERATOR"
 
 # The channel where clan applications are sent
-CLAN_APPROVAL_CHANNEL_NAME = 1541901386852081815
+CLAN_APPROVAL_CHANNEL_NAME = "clan-approval"
 
 
 # ============================================================
