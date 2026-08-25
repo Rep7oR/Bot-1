@@ -599,6 +599,45 @@ async def assignall(
     )
 
 
+# ---------- ROLE MANAGEMENT COMMANDS ----------
+
+@app_commands.command(name="assignall", description="Assign a role to all members")
+@app_commands.describe(role="Role to assign")
+@app_commands.default_permissions(manage_roles=True)
+async def assignall(
+    interaction: discord.Interaction,
+    role: discord.Role
+):
+    if role >= interaction.guild.me.top_role:
+        await interaction.response.send_message(
+            "❌ I cannot manage this role.",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    success = 0
+    failed = 0
+
+    for member in interaction.guild.members:
+        if member.bot:
+            continue
+
+        try:
+            if role not in member.roles:
+                await member.add_roles(role)
+                success += 1
+        except (discord.Forbidden, discord.HTTPException):
+            failed += 1
+
+    await interaction.followup.send(
+        f"✅ Assigned {role.mention} to **{success}** members.\n"
+        f"❌ Failed: **{failed}**",
+        ephemeral=True
+    )
+
+
 @app_commands.command(name="assign", description="Assign a role to a member")
 @app_commands.describe(
     member="Member to assign the role to",
@@ -652,10 +691,12 @@ async def removeall(
     failed = 0
 
     for member in interaction.guild.members:
+        if role not in member.roles:
+            continue
+
         try:
-            if role in member.roles:
-                await member.remove_roles(role)
-                success += 1
+            await member.remove_roles(role)
+            success += 1
         except (discord.Forbidden, discord.HTTPException):
             failed += 1
 
@@ -697,6 +738,14 @@ async def remove(
             "❌ I don't have permission to remove this role.",
             ephemeral=True
         )
+
+
+# ---------- REGISTER COMMANDS ----------
+
+bot.tree.add_command(assignall)
+bot.tree.add_command(assign)
+bot.tree.add_command(removeall)
+bot.tree.add_command(remove)
     
 @tasks.loop(seconds=SCAN_INTERVAL)
 async def poll_games():
