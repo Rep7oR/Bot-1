@@ -131,23 +131,23 @@ class Announce(commands.Cog):
         # SERVER INFORMATION
         # =================================================
 
-        embed.add_field(
-            name="🏠 Server",
-            value=guild.name,
-            inline=True
-        )
+        #embed.add_field(
+         #   name="🏠 Server",
+          #  value=guild.name,
+           # inline=True
+        #)
 
-        embed.add_field(
-            name="👥 Members",
-            value=str(guild.member_count),
-            inline=True
-        )
+        #embed.add_field(
+         #   name="👥 Members",
+          #  value=str(guild.member_count),
+           # inline=True
+        #)
 
-        embed.add_field(
-            name="📢 Posted In",
-            value=channel.mention,
-            inline=True
-        )
+        #embed.add_field(
+         #   name="📢 Posted In",
+          #  value=channel.mention,
+           # inline=True
+        #)
 
         # =================================================
         # HELP / MODERATOR SECTION
