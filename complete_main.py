@@ -601,13 +601,11 @@ async def assignall(
 
 # ---------- ROLE MANAGEMENT COMMANDS ----------
 
-@app_commands.command(name="assignall", description="Assign a role to all members")
+@bot.tree.command(name="assignall", description="Assign a role to all members")
 @app_commands.describe(role="Role to assign")
 @app_commands.default_permissions(manage_roles=True)
-async def assignall(
-    interaction: discord.Interaction,
-    role: discord.Role
-):
+async def assignall(interaction, role: discord.Role):
+
     if role >= interaction.guild.me.top_role:
         await interaction.response.send_message(
             "❌ I cannot manage this role.",
@@ -621,6 +619,7 @@ async def assignall(
     failed = 0
 
     for member in interaction.guild.members:
+
         if member.bot:
             continue
 
@@ -628,6 +627,7 @@ async def assignall(
             if role not in member.roles:
                 await member.add_roles(role)
                 success += 1
+
         except (discord.Forbidden, discord.HTTPException):
             failed += 1
 
@@ -638,17 +638,14 @@ async def assignall(
     )
 
 
-@app_commands.command(name="assign", description="Assign a role to a member")
+@bot.tree.command(name="assign", description="Assign a role to a member")
 @app_commands.describe(
     member="Member to assign the role to",
     role="Role to assign"
 )
 @app_commands.default_permissions(manage_roles=True)
-async def assign(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    role: discord.Role
-):
+async def assign(interaction, member: discord.Member, role: discord.Role):
+
     if role >= interaction.guild.me.top_role:
         await interaction.response.send_message(
             "❌ I cannot manage this role.",
@@ -671,13 +668,11 @@ async def assign(
         )
 
 
-@app_commands.command(name="removeall", description="Remove a role from all members")
+@bot.tree.command(name="removeall", description="Remove a role from all members")
 @app_commands.describe(role="Role to remove")
 @app_commands.default_permissions(manage_roles=True)
-async def removeall(
-    interaction: discord.Interaction,
-    role: discord.Role
-):
+async def removeall(interaction, role: discord.Role):
+
     if role >= interaction.guild.me.top_role:
         await interaction.response.send_message(
             "❌ I cannot manage this role.",
@@ -691,12 +686,14 @@ async def removeall(
     failed = 0
 
     for member in interaction.guild.members:
+
         if role not in member.roles:
             continue
 
         try:
             await member.remove_roles(role)
             success += 1
+
         except (discord.Forbidden, discord.HTTPException):
             failed += 1
 
@@ -707,17 +704,14 @@ async def removeall(
     )
 
 
-@app_commands.command(name="remove", description="Remove a role from a member")
+@bot.tree.command(name="remove", description="Remove a role from a member")
 @app_commands.describe(
     member="Member to remove the role from",
     role="Role to remove"
 )
 @app_commands.default_permissions(manage_roles=True)
-async def remove(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    role: discord.Role
-):
+async def remove(interaction, member: discord.Member, role: discord.Role):
+
     if role >= interaction.guild.me.top_role:
         await interaction.response.send_message(
             "❌ I cannot manage this role.",
@@ -738,14 +732,6 @@ async def remove(
             "❌ I don't have permission to remove this role.",
             ephemeral=True
         )
-
-
-# ---------- REGISTER COMMANDS ----------
-
-bot.tree.add_command(assignall)
-bot.tree.add_command(assign)
-bot.tree.add_command(removeall)
-bot.tree.add_command(remove)
     
 @tasks.loop(seconds=SCAN_INTERVAL)
 async def poll_games():
