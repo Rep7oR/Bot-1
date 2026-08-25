@@ -6,4 +6,4 @@ typing-extensions==4.12.2
 audioop-lts>=0.2.1
 flask
 gunicorn
-
+yt-dlp
