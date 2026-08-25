@@ -470,16 +470,27 @@ async def msg(ctx, channel: discord.TextChannel, *, message):
     
 
 
+# ---------- Cog Load Commands ----------
 
 
-
-
-
-# In your main bot file
 async def load_cogs():
-    for filename in os.listdir('./cogs'):
-        if filename.endswith('.py'):
-            await bot.load_extension(f'cogs.{filename[:-3]}')
+    """Load all cogs from the cogs folder"""
+    cogs_folder = './cogs'
+    
+    if not os.path.exists(cogs_folder):
+        os.makedirs(cogs_folder)
+    
+    for filename in os.listdir(cogs_folder):
+        if filename.endswith('.py') and not filename.startswith('_'):
+            try:
+                await bot.load_extension(f'cogs.{filename[:-3]}')
+                print(f'✅ Loaded cog: {filename}')
+            except Exception as e:
+                print(f'❌ Failed to load {filename}: {e}')
+
+
+
+
 
 
 
