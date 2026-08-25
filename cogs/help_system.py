@@ -1,4 +1,3 @@
-```python
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -1273,4 +1272,3 @@ async def setup(bot):
     await bot.add_cog(
         HelpSystem(bot)
     )
-```
