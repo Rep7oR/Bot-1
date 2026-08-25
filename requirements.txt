@@ -7,3 +7,4 @@ audioop-lts>=0.2.1
 flask
 gunicorn
 yt-dlp
+PyNaCl
