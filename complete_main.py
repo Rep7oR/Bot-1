@@ -487,6 +487,145 @@ async def post_invite(ctx):
         embed.set_thumbnail(url=ctx.guild.icon.url)
     view = InviteView(invite.url)
     await ctx.send(embed=embed, view=view)
+# /assignall
+@app_commands.command(name="assignall", description="Assign a role to all members")
+@app_commands.describe(role="Role to assign")
+@app_commands.default_permissions(manage_roles=True)
+async def assignall(self, interaction: discord.Interaction, role: discord.Role):
+
+    if role >= interaction.guild.me.top_role:
+        await interaction.response.send_message(
+            "❌ I cannot manage this role.",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    success = 0
+    failed = 0
+
+    for member in interaction.guild.members:
+        if member.bot:
+            continue
+
+        try:
+            if role not in member.roles:
+                await member.add_roles(role)
+                success += 1
+        except (discord.Forbidden, discord.HTTPException):
+            failed += 1
+
+    await interaction.followup.send(
+        f"✅ Assigned {role.mention} to **{success}** members.\n"
+        f"❌ Failed: **{failed}**",
+        ephemeral=True
+    )
+
+
+# /assign
+@app_commands.command(name="assign", description="Assign a role to a member")
+@app_commands.describe(
+    member="Member to assign the role to",
+    role="Role to assign"
+)
+@app_commands.default_permissions(manage_roles=True)
+async def assign(
+    self,
+    interaction: discord.Interaction,
+    member: discord.Member,
+    role: discord.Role
+):
+
+    if role >= interaction.guild.me.top_role:
+        await interaction.response.send_message(
+            "❌ I cannot manage this role.",
+            ephemeral=True
+        )
+        return
+
+    try:
+        await member.add_roles(role)
+
+        await interaction.response.send_message(
+            f"✅ {role.mention} assigned to {member.mention}.",
+            ephemeral=True
+        )
+
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            "❌ I don't have permission to assign this role.",
+            ephemeral=True
+        )
+
+
+# /removeall
+@app_commands.command(name="removeall", description="Remove a role from all members")
+@app_commands.describe(role="Role to remove")
+@app_commands.default_permissions(manage_roles=True)
+async def removeall(self, interaction: discord.Interaction, role: discord.Role):
+
+    if role >= interaction.guild.me.top_role:
+        await interaction.response.send_message(
+            "❌ I cannot manage this role.",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    success = 0
+    failed = 0
+
+    for member in interaction.guild.members:
+        try:
+            if role in member.roles:
+                await member.remove_roles(role)
+                success += 1
+        except (discord.Forbidden, discord.HTTPException):
+            failed += 1
+
+    await interaction.followup.send(
+        f"✅ Removed {role.mention} from **{success}** members.\n"
+        f"❌ Failed: **{failed}**",
+        ephemeral=True
+    )
+
+
+# /remove
+@app_commands.command(name="remove", description="Remove a role from a member")
+@app_commands.describe(
+    member="Member to remove the role from",
+    role="Role to remove"
+)
+@app_commands.default_permissions(manage_roles=True)
+async def remove(
+    self,
+    interaction: discord.Interaction,
+    member: discord.Member,
+    role: discord.Role
+):
+
+    if role >= interaction.guild.me.top_role:
+        await interaction.response.send_message(
+            "❌ I cannot manage this role.",
+            ephemeral=True
+        )
+        return
+
+    try:
+        await member.remove_roles(role)
+
+        await interaction.response.send_message(
+            f"✅ {role.mention} removed from {member.mention}.",
+            ephemeral=True
+        )
+
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            "❌ I don't have permission to remove this role.",
+            ephemeral=True
+        )
     
 @tasks.loop(seconds=SCAN_INTERVAL)
 async def poll_games():
