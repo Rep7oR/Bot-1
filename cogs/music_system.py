@@ -143,6 +143,170 @@ class MusicSystem(commands.Cog):
         # Start watchdog
         self.music_watchdog.start()
 
+    @app_commands.command(
+    name="voicetest",
+    description="Test the Discord voice connection."
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def voicetest(self, interaction: discord.Interaction):
+
+    guild = interaction.guild
+
+    if guild is None:
+        await interaction.response.send_message(
+            "❌ Server only.",
+            ephemeral=True
+        )
+        return
+
+    config = self.config.get(str(guild.id))
+
+    if not config:
+        await interaction.response.send_message(
+            "❌ Music system is not configured. Run /setmusic first.",
+            ephemeral=True
+        )
+        return
+
+    channel = guild.get_channel(
+        config.get("voice_channel_id")
+    )
+
+    if channel is None:
+        await interaction.response.send_message(
+            "❌ Music voice channel does not exist.",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(
+        ephemeral=True
+    )
+
+    print("\n" + "=" * 60)
+    print("🎧 DISCORD VOICE DIAGNOSTIC")
+    print("=" * 60)
+    print(f"Guild: {guild.name}")
+    print(f"Guild ID: {guild.id}")
+    print(f"Channel: {channel.name}")
+    print(f"Channel ID: {channel.id}")
+
+    try:
+
+        # Remove stale connection
+        old_vc = guild.voice_client
+
+        if old_vc:
+
+            print("⚠️ Existing voice client found.")
+
+            try:
+                await old_vc.disconnect(force=True)
+            except Exception as e:
+                print(f"Disconnect error: {e}")
+
+            await asyncio.sleep(2)
+
+        print("🔌 Calling channel.connect()...")
+
+        vc = await channel.connect(
+            timeout=60,
+            reconnect=False
+        )
+
+        print("✅ channel.connect() returned!")
+
+        print(f"Connected: {vc.is_connected()}")
+        print(f"Channel: {vc.channel}")
+
+        if vc.endpoint:
+            print(f"Endpoint: {vc.endpoint}")
+
+        if vc.session_id:
+            print(f"Session ID received: YES")
+        else:
+            print("Session ID received: NO")
+
+        print("=" * 60)
+
+        await interaction.followup.send(
+            "🟢 **VOICE CONNECTION SUCCESSFUL**\n\n"
+            f"🎧 Channel: {channel.mention}\n"
+            f"🔌 Connected: `{vc.is_connected()}`\n"
+            f"📡 Endpoint: `{vc.endpoint}`",
+            ephemeral=True
+        )
+
+    except asyncio.TimeoutError:
+
+        print(
+            "❌ VOICE CONNECTION TIMEOUT"
+        )
+
+        print(
+            "The bot could not complete the Discord "
+            "voice connection within 60 seconds."
+        )
+
+        print("=" * 60)
+
+        await interaction.followup.send(
+            "🔴 **VOICE CONNECTION TIMEOUT**\n\n"
+            "The bot has the Discord permissions, "
+            "but it could not complete the Discord "
+            "voice connection.\n\n"
+            "Check the Render logs — this points to "
+            "the voice/network connection rather than "
+            "the music source.",
+            ephemeral=True
+        )
+
+    except discord.Forbidden as e:
+
+        print(
+            f"❌ DISCORD FORBIDDEN: {e}"
+        )
+
+        print("=" * 60)
+
+        await interaction.followup.send(
+            f"🔴 **Discord rejected the voice connection**\n\n"
+            f"`{e}`",
+            ephemeral=True
+        )
+
+    except discord.ClientException as e:
+
+        print(
+            f"❌ DISCORD CLIENT ERROR: {e}"
+        )
+
+        print("=" * 60)
+
+        await interaction.followup.send(
+            f"🔴 **Discord client error**\n\n"
+            f"`{e}`",
+            ephemeral=True
+        )
+
+    except Exception as e:
+
+        print(
+            f"❌ VOICE ERROR TYPE: {type(e).__name__}"
+        )
+
+        print(
+            f"❌ VOICE ERROR: {e}"
+        )
+
+        print("=" * 60)
+
+        await interaction.followup.send(
+            f"🔴 **Voice connection failed**\n\n"
+            f"Type: `{type(e).__name__}`\n"
+            f"Error: `{e}`",
+            ephemeral=True
+        )
     # =====================================================
     # COG UNLOAD
     # =====================================================
