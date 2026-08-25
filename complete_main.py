@@ -444,27 +444,7 @@ async def send_welcome_dm(member):
     except discord.Forbidden:
         print(f"Could not DM {member.name}")
 
-# ---------- CATEGORY 5: Commands ----------
-@bot.command(name="dmall")
-@commands.has_permissions(administrator=True)
-async def dmall(ctx, *, content):
-    await ctx.send("Sending DMs... (may take a while)")
-    count, fail = 0, 0
-    for member in ctx.guild.members:
-        if not member.bot:
-            try:
-                await member.send(content)
-                count += 1
-            except:
-                fail += 1
-        await asyncio.sleep(0.5)
-    await ctx.send(f"✅ Dmed {count}, failed {fail}")
 
-@bot.command(name="msg")
-@commands.has_permissions(administrator=True)
-async def msg(ctx, channel: discord.TextChannel, *, message):
-    await channel.send(message)
-    await ctx.send(f"✅ Sent message in {channel.mention}")
 
 
     
