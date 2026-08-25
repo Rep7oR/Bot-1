@@ -13,7 +13,7 @@ import os
 CONFIG_FILE = "voice_config.json"
 
 MODERATOR_ROLE_NAMES = [
-    "Moderator",
+    "MODERATOR",
     "Moderators",
     "Mod",
 ]
