@@ -470,24 +470,7 @@ async def msg(ctx, channel: discord.TextChannel, *, message):
     
 
 
-@bot.command(name="post_invite")
-@commands.has_permissions(administrator=True)
-async def post_invite(ctx):
-    try:
-        invite = await ctx.channel.create_invite(max_age=0, max_uses=0, unique=False)
-    except discord.Forbidden:
-        return await ctx.send("I don't have permission to create an invite in this channel. Give me 'Create Invite' permission.")
-    except Exception as e:
-        return await ctx.send(f"Failed to create invite: {e}")
-    embed = discord.Embed(
-        title=f"Invite Link | {ctx.guild.name}",
-        description="Click the button below to get the invite link sent to your DMs!",
-        color=discord.Color.blue()
-    )
-    if ctx.guild.icon:
-        embed.set_thumbnail(url=ctx.guild.icon.url)
-    view = InviteView(invite.url)
-    await ctx.send(embed=embed, view=view)
+
 
 
 
