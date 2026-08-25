@@ -600,7 +600,6 @@ async def assignall(
 
 
 # ---------- ROLE MANAGEMENT COMMANDS ----------
-
 @bot.tree.command(name="assignall", description="Assign a role to all members")
 @app_commands.describe(role="Role to assign")
 @app_commands.default_permissions(manage_roles=True)
@@ -619,7 +618,6 @@ async def assignall(interaction, role: discord.Role):
     failed = 0
 
     for member in interaction.guild.members:
-
         if member.bot:
             continue
 
@@ -627,7 +625,6 @@ async def assignall(interaction, role: discord.Role):
             if role not in member.roles:
                 await member.add_roles(role)
                 success += 1
-
         except (discord.Forbidden, discord.HTTPException):
             failed += 1
 
@@ -686,14 +683,12 @@ async def removeall(interaction, role: discord.Role):
     failed = 0
 
     for member in interaction.guild.members:
-
         if role not in member.roles:
             continue
 
         try:
             await member.remove_roles(role)
             success += 1
-
         except (discord.Forbidden, discord.HTTPException):
             failed += 1
 
@@ -732,7 +727,7 @@ async def remove(interaction, member: discord.Member, role: discord.Role):
             "❌ I don't have permission to remove this role.",
             ephemeral=True
         )
-    
+
 @tasks.loop(seconds=SCAN_INTERVAL)
 async def poll_games():
     await scan_activities()
