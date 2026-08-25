@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import random
 import math
 import time
+from discord import app_commands
 from server import keep_alive
 # -----------------------------
 # MAIN CONFIG - EDIT BELOW
