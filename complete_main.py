@@ -178,10 +178,7 @@ async def setup_hook():
         print(f"❌ Failed to sync slash commands: {e}")
 
 
-# ---------- GAME SCANNER ----------
-@tasks.loop(seconds=SCAN_INTERVAL)
-async def poll_games():
-    await scan_activities()
+
 
 
 # ---------- BOT STARTUP ----------
