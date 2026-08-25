@@ -229,37 +229,37 @@ async def scan_activities():
 
 
     
-@bot.event
-async def on_member_join(member):
-    member_join_times[member.id] = datetime.utcnow()
-    # Send a welcome notification to a public channel
-    if not member.bot:
-        channel = bot.get_channel(WELCOME_CHANNEL_ID)
-        if channel:
-            embed = discord.Embed(
-                title=f"WELCOME TO {member.guild.name.upper()}!",
-                description=random.choice(random_welcome_messages),
-                color=discord.Color.blue()
-            )
-            embed.set_thumbnail(url=member.display_avatar.url)
-            embed.add_field(name="Member Joined", value=f"{member.mention}", inline=False)
-            embed.add_field(name="A Small Note", value="Please make sure to read the rules!", inline=False)
+# @bot.event
+# async def on_member_join(member):
+#     member_join_times[member.id] = datetime.utcnow()
+#     # Send a welcome notification to a public channel
+#     if not member.bot:
+#         channel = bot.get_channel(WELCOME_CHANNEL_ID)
+#         if channel:
+#             embed = discord.Embed(
+#                 title=f"WELCOME TO {member.guild.name.upper()}!",
+#                 description=random.choice(random_welcome_messages),
+#                 color=discord.Color.blue()
+#             )
+#             embed.set_thumbnail(url=member.display_avatar.url)
+#             embed.add_field(name="Member Joined", value=f"{member.mention}", inline=False)
+#             embed.add_field(name="A Small Note", value="Please make sure to read the rules!", inline=False)
             
-            # Create the button view
-            view = discord.ui.View()
-            view.add_item(discord.ui.Button(
-                label="Read the Rules",
-                style=discord.ButtonStyle.link,
-                url=f"https://discord.com/channels/{REACTION_GUILD_ID}/{WELCOME_RULES_CHANNEL_ID}/{REACTION_MESSAGE_ID}"
-            ))
+#             # Create the button view
+#             view = discord.ui.View()
+#             view.add_item(discord.ui.Button(
+#                 label="Read the Rules",
+#                 style=discord.ButtonStyle.link,
+#                 url=f"https://discord.com/channels/{REACTION_GUILD_ID}/{WELCOME_RULES_CHANNEL_ID}/{REACTION_MESSAGE_ID}"
+#             ))
             
-            await channel.send(content="@everyone", embed=embed, view=view)
+#             await channel.send(content="@everyone", embed=embed, view=view)
             
-    # Send a private welcome DM to the new member (existing code)
-    if member.id in member_join_times:
-        del member_join_times[member.id]
-    await setup_stats_voice(member.guild)
-    await send_welcome_dm(member)
+#     # Send a private welcome DM to the new member (existing code)
+#     if member.id in member_join_times:
+#         del member_join_times[member.id]
+#     await setup_stats_voice(member.guild)
+#     await send_welcome_dm(member)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
