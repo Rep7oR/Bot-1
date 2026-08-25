@@ -47,7 +47,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # In-memory caches
 
 
-]
+
 member_join_times = {}  # {member_id: datetime}
 def is_member_online(guild):
     member_role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
