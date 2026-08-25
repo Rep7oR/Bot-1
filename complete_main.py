@@ -502,7 +502,7 @@ async def setup_hook():
     # Sync slash commands
     try:
         synced = await bot.tree.sync()
-        print(f"✅ Synced {len(synced)} slash commands")
+        print(f"Synced {len(synced)} commands.")
 
     except Exception as e:
         print(f"❌ Failed to sync slash commands: {e}")
