@@ -8,7 +8,7 @@ from discord import app_commands, ui
 # ============================================================
 
 # The Discord role that is allowed to approve/reject clans
-MODERATOR_ROLE_NAME = "MODERATORr"
+MODERATOR_ROLE_NAME = "MODERATOR"
 
 # The channel where clan applications are sent
 CLAN_APPROVAL_CHANNEL_NAME = "1541901386852081815"
