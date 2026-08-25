@@ -732,7 +732,7 @@ async def remove(interaction, member: discord.Member, role: discord.Role):
 async def poll_games():
     await scan_activities()
 # ---------- CATEGORY 6: Bot Startup ----------
-@@bot.event
+@bot.event
 async def on_ready():
     print(f"Bot online as {bot.user}")
 
