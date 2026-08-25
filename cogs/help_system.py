@@ -212,60 +212,176 @@ class PrivateTicketView(discord.ui.View):
         emoji="🔒",
         style=discord.ButtonStyle.danger
     )
-    async def close_ticket(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
+   async def close_ticket(
+    self,
+    guild: discord.Guild,
+    token: str,
+    moderator: discord.Member
+):
 
-        if not isinstance(
-            interaction.user,
-            discord.Member
-        ):
-            return
+    ticket = self.tickets.get(token)
 
-        # Only moderators can close
-        if not is_moderator(interaction.user):
+    if not ticket:
+        return
 
-            await interaction.response.send_message(
-                "❌ Only moderators can close this ticket.",
-                ephemeral=True
+    if ticket.get("closed", False):
+        return
+
+    # Mark ticket as closed
+    ticket["closed"] = True
+    ticket["closed_by"] = moderator.id
+    ticket["closed_at"] = int(
+        discord.utils.utcnow().timestamp()
+    )
+
+    self.save_tickets()
+
+    # =====================================================
+    # GET MEMBER
+    # =====================================================
+
+    try:
+        member = await self.bot.fetch_user(
+            ticket["user_id"]
+        )
+    except discord.HTTPException:
+        member = None
+
+    # =====================================================
+    # SEND CLOSED DM TO MEMBER
+    # =====================================================
+
+    if member:
+
+        try:
+
+            embed = discord.Embed(
+                title="🔒 Support Ticket Closed",
+                description=(
+                    f"Your support ticket **{token}** "
+                    f"in **{guild.name}** has been closed.\n\n"
+                    "If you need help again, you can use "
+                    "`/help` to create a new support request."
+                ),
+                color=discord.Color.red()
             )
 
-            return
+            if guild.icon:
+                embed.set_thumbnail(
+                    url=guild.icon.url
+                )
 
-        ticket = self.cog.tickets.get(
-            self.token
-        )
-
-        if not ticket:
-
-            await interaction.response.send_message(
-                "❌ Ticket information could not be found.",
-                ephemeral=True
+            embed.set_footer(
+                text=f"{guild.name} • Support System",
+                icon_url=(
+                    guild.icon.url
+                    if guild.icon
+                    else None
+                )
             )
 
-            return
-
-        if ticket.get("closed", False):
-
-            await interaction.response.send_message(
-                "❌ This ticket is already closed.",
-                ephemeral=True
+            await member.send(
+                embed=embed
             )
 
-            return
+        except discord.HTTPException:
+            pass
 
-        await interaction.response.send_message(
-            "🔒 Closing this ticket...",
-            ephemeral=True
+    # =====================================================
+    # DELETE PRIVATE TICKET CHANNEL
+    # =====================================================
+
+    ticket_channel_id = ticket.get(
+        "channel_id"
+    )
+
+    if ticket_channel_id:
+
+        ticket_channel = guild.get_channel(
+            ticket_channel_id
         )
 
-        await self.cog.close_ticket(
-            interaction.guild,
-            self.token,
-            interaction.user
-        )
+        if ticket_channel:
+
+            try:
+
+                await ticket_channel.delete(
+                    reason=(
+                        f"Support ticket {token} "
+                        f"closed by {moderator}"
+                    )
+                )
+
+            except discord.Forbidden:
+
+                print(
+                    f"❌ Cannot delete ticket channel "
+                    f"for {token}"
+                )
+
+            except discord.HTTPException as e:
+
+                print(
+                    f"❌ Error deleting ticket channel "
+                    f"{token}: {e}"
+                )
+
+    # =====================================================
+    # DELETE ORIGINAL SUPPORT MESSAGE
+    # =====================================================
+
+    support_channel = self.get_support_channel(
+        guild
+    )
+
+    support_message_id = ticket.get(
+        "support_message_id"
+    )
+
+    if support_channel and support_message_id:
+
+        try:
+
+            support_message = await support_channel.fetch_message(
+                support_message_id
+            )
+
+            await support_message.delete()
+
+            print(
+                f"🗑️ Deleted support request "
+                f"{token} from #{support_channel.name}"
+            )
+
+        except discord.NotFound:
+
+            # Message was already deleted
+            pass
+
+        except discord.Forbidden:
+
+            print(
+                f"❌ Cannot delete support message "
+                f"for {token}"
+            )
+
+        except discord.HTTPException as e:
+
+            print(
+                f"❌ Error deleting support message "
+                f"{token}: {e}"
+            )
+
+    # =====================================================
+    # SAVE FINAL TICKET STATE
+    # =====================================================
+
+    self.save_tickets()
+
+    print(
+        f"🔒 Ticket {token} completely closed "
+        f"by {moderator}"
+    )
 
 
 # =========================================================
