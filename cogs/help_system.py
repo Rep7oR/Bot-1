@@ -1480,6 +1480,7 @@ class HelpSystem(
         error
     ):
 
+
         if isinstance(
             error,
             app_commands.errors.MissingPermissions
