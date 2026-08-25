@@ -599,7 +599,10 @@ async def assignall(
     )
 
 
+
+
 # ---------- ROLE MANAGEMENT COMMANDS ----------
+
 @bot.tree.command(name="assignall", description="Assign a role to all members")
 @app_commands.describe(role="Role to assign")
 @app_commands.default_permissions(manage_roles=True)
@@ -610,9 +613,11 @@ async def assignall(interaction: discord.Interaction, role: discord.Role):
             ephemeral=True
         )
         return
+    
     await interaction.response.defer(ephemeral=True)
     success = 0
     failed = 0
+    
     for member in interaction.guild.members:
         if member.bot:
             continue
@@ -622,11 +627,13 @@ async def assignall(interaction: discord.Interaction, role: discord.Role):
                 success += 1
         except (discord.Forbidden, discord.HTTPException):
             failed += 1
+    
     await interaction.followup.send(
         f"✅ Assigned {role.mention} to **{success}** members.\n"
         f"❌ Failed: **{failed}**",
         ephemeral=True
     )
+
 
 @bot.tree.command(name="assign", description="Assign a role to a member")
 @app_commands.describe(
@@ -641,6 +648,7 @@ async def assign(interaction: discord.Interaction, member: discord.Member, role:
             ephemeral=True
         )
         return
+    
     try:
         await member.add_roles(role)
         await interaction.response.send_message(
@@ -653,6 +661,7 @@ async def assign(interaction: discord.Interaction, member: discord.Member, role:
             ephemeral=True
         )
 
+
 @bot.tree.command(name="removeall", description="Remove a role from all members")
 @app_commands.describe(role="Role to remove")
 @app_commands.default_permissions(manage_roles=True)
@@ -663,9 +672,11 @@ async def removeall(interaction: discord.Interaction, role: discord.Role):
             ephemeral=True
         )
         return
+    
     await interaction.response.defer(ephemeral=True)
     success = 0
     failed = 0
+    
     for member in interaction.guild.members:
         if role not in member.roles:
             continue
@@ -674,11 +685,13 @@ async def removeall(interaction: discord.Interaction, role: discord.Role):
             success += 1
         except (discord.Forbidden, discord.HTTPException):
             failed += 1
+    
     await interaction.followup.send(
         f"✅ Removed {role.mention} from **{success}** members.\n"
         f"❌ Failed: **{failed}**",
         ephemeral=True
     )
+
 
 @bot.tree.command(name="remove", description="Remove a role from a member")
 @app_commands.describe(
@@ -693,6 +706,7 @@ async def remove(interaction: discord.Interaction, member: discord.Member, role:
             ephemeral=True
         )
         return
+    
     try:
         await member.remove_roles(role)
         await interaction.response.send_message(
