@@ -469,48 +469,67 @@ async def msg(ctx, channel: discord.TextChannel, *, message):
 
     
 
-
-# ---------- Cog Load Commands ----------
-
-
+# ---------- LOAD COGS ----------
 async def load_cogs():
     """Load all cogs from the cogs folder"""
-    cogs_folder = './cogs'
-    
+
+    cogs_folder = "./cogs"
+
     if not os.path.exists(cogs_folder):
         os.makedirs(cogs_folder)
-    
+
     for filename in os.listdir(cogs_folder):
-        if filename.endswith('.py') and not filename.startswith('_'):
+
+        if filename.endswith(".py") and not filename.startswith("_"):
+
+            extension = f"cogs.{filename[:-3]}"
+
             try:
-                await bot.load_extension(f'cogs.{filename[:-3]}')
-                print(f'✅ Loaded cog: {filename}')
+                await bot.load_extension(extension)
+                print(f"✅ Loaded cog: {filename}")
+
             except Exception as e:
-                print(f'❌ Failed to load {filename}: {e}')
+                print(f"❌ Failed to load {filename}: {e}")
 
 
+# ---------- BOT SETUP ----------
+@bot.event
+async def setup_hook():
+
+    # Load all Cogs BEFORE the bot becomes ready
+    await load_cogs()
+
+    # Sync slash commands
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ Synced {len(synced)} slash commands")
+
+    except Exception as e:
+        print(f"❌ Failed to sync slash commands: {e}")
 
 
-
-
-
+# ---------- GAME SCANNER ----------
 @tasks.loop(seconds=SCAN_INTERVAL)
 async def poll_games():
     await scan_activities()
-# ---------- CATEGORY 6: Bot Startup ----------
+
+
+# ---------- BOT STARTUP ----------
 @bot.event
 async def on_ready():
-    print(f"Bot online as {bot.user}")
-    await load_cogs()
-    await bot.tree.sync()
 
-    poll_games.start()
+    print(f"Bot online as {bot.user}")
+
+    # Prevent the loop from being started multiple times
+    if not poll_games.is_running():
+        poll_games.start()
+
     keep_alive()
 
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.watching,
-            name=" Watching the community"
+            name="Watching the community"
         ),
         status=discord.Status.online
     )
