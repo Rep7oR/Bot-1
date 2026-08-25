@@ -1,4 +1,3 @@
-
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -24,20 +23,14 @@ def load_config():
         return {}
 
     try:
-
         with open(
             CONFIG_FILE,
             "r",
             encoding="utf-8"
         ) as f:
-
             return json.load(f)
 
-    except (
-        json.JSONDecodeError,
-        FileNotFoundError
-    ):
-
+    except (json.JSONDecodeError, FileNotFoundError):
         return {}
 
 
@@ -48,7 +41,6 @@ def save_config(config):
         "w",
         encoding="utf-8"
     ) as f:
-
         json.dump(
             config,
             f,
@@ -68,15 +60,16 @@ class VoiceSystem(commands.Cog):
 
         self.config = load_config()
 
-        # Temporary voice channels
+        # =================================================
+        # Temporary rooms
         #
-        # {
-        #     channel_id: {
-        #         "owner_id": member_id,
-        #         "guild_id": guild_id
-        #     }
+        # voice_id: {
+        #     owner_id,
+        #     guild_id,
+        #     text_channel_id
         # }
-        #
+        # =================================================
+
         self.temp_channels = {}
 
     # =====================================================
@@ -88,9 +81,8 @@ class VoiceSystem(commands.Cog):
         description="Set up the Join-to-Create voice system."
     )
     @app_commands.describe(
-        category="Category where temporary voice channels will be created.",
-        join_channel="Voice channel members join to create their room.",
-        control_channel="Text channel for voice room controls."
+        category="Category where temporary rooms are created.",
+        join_channel="Voice channel members join to create a room."
     )
     @app_commands.checks.has_permissions(
         administrator=True
@@ -99,8 +91,7 @@ class VoiceSystem(commands.Cog):
         self,
         interaction: discord.Interaction,
         category: discord.CategoryChannel,
-        join_channel: discord.VoiceChannel,
-        control_channel: discord.TextChannel
+        join_channel: discord.VoiceChannel
     ):
 
         guild = interaction.guild
@@ -115,16 +106,12 @@ class VoiceSystem(commands.Cog):
             return
 
         # -------------------------------------------------
-        # SAVE CONFIGURATION
+        # SAVE CONFIG
         # -------------------------------------------------
 
         self.config[str(guild.id)] = {
-
             "category_id": category.id,
-
-            "join_channel_id": join_channel.id,
-
-            "control_channel_id": control_channel.id
+            "join_channel_id": join_channel.id
         }
 
         save_config(
@@ -132,26 +119,25 @@ class VoiceSystem(commands.Cog):
         )
 
         # -------------------------------------------------
-        # SEND SETUP MESSAGE
+        # CONFIRMATION
         # -------------------------------------------------
 
         embed = discord.Embed(
-            title="🎧 Temporary Voice Channels",
+            title="🎧 Voice System Configured",
             description=(
-                "Voice channel system has been configured.\n\n"
+                "The Join-to-Create voice system is now active.\n\n"
 
-                f"🎤 **Join Channel:** "
-                f"{join_channel.mention}\n"
+                f"🎤 **Join Channel:** {join_channel.mention}\n"
+                f"📂 **Category:** `{category.name}`\n\n"
 
-                f"📂 **Category:** "
-                f"`{category.name}`\n"
+                "When a member joins the Join-to-Create channel, "
+                "the bot will automatically create:\n\n"
 
-                f"⚙️ **Control Channel:** "
-                f"{control_channel.mention}\n\n"
+                "🎧 A private temporary voice channel\n"
+                "💬 A private temporary control channel\n\n"
 
-                "Members can join the configured voice channel "
-                "to automatically receive their own temporary "
-                "voice room."
+                "Both channels will automatically be deleted "
+                "when the owner leaves their voice channel."
             ),
             color=discord.Color.blurple()
         )
@@ -176,57 +162,6 @@ class VoiceSystem(commands.Cog):
             ephemeral=True
         )
 
-        # -------------------------------------------------
-        # SEND CONTROL CHANNEL MESSAGE
-        # -------------------------------------------------
-
-        try:
-
-            setup_embed = discord.Embed(
-                title="🎧 Join to Create",
-                description=(
-                    f"Join {join_channel.mention} to "
-                    "automatically create your own temporary "
-                    "voice channel.\n\n"
-
-                    "**Available controls:**\n"
-                    "✏️ Rename your room\n"
-                    "👥 Set user limit\n"
-                    "🔗 Create an invite\n"
-                    "🔒 Lock / unlock your room\n"
-                    "👑 Transfer ownership\n"
-                    "🗑️ Delete your room"
-                ),
-                color=discord.Color.blurple()
-            )
-
-            if guild.icon:
-
-                setup_embed.set_thumbnail(
-                    url=guild.icon.url
-                )
-
-            setup_embed.set_footer(
-                text=f"{guild.name} • Voice System",
-                icon_url=(
-                    guild.icon.url
-                    if guild.icon
-                    else None
-                )
-            )
-
-            await control_channel.send(
-                embed=setup_embed
-            )
-
-        except discord.Forbidden:
-
-            await interaction.followup.send(
-                f"⚠️ The system is configured, but I cannot "
-                f"send messages in {control_channel.mention}.",
-                ephemeral=True
-            )
-
     # =====================================================
     # VOICE STATE UPDATE
     # =====================================================
@@ -246,7 +181,6 @@ class VoiceSystem(commands.Cog):
         )
 
         if not guild_config:
-
             return
 
         join_channel_id = guild_config.get(
@@ -270,109 +204,17 @@ class VoiceSystem(commands.Cog):
                 category_id
             )
 
-            # -------------------------------------------------
-            # CREATE TEMPORARY VOICE CHANNEL
-            # -------------------------------------------------
-
-            overwrites = {
-
-                # Everyone
-                guild.default_role:
-                    discord.PermissionOverwrite(
-                        connect=True,
-                        speak=True,
-                        stream=True,
-                        view_channel=True,
-                        use_voice_activation=True
-                    ),
-
-                # Owner
-                member:
-                    discord.PermissionOverwrite(
-                        manage_channels=True,
-                        move_members=True,
-                        mute_members=True,
-                        deafen_members=True,
-                        connect=True,
-                        speak=True,
-                        stream=True,
-                        view_channel=True,
-                        use_voice_activation=True
-                    )
-            }
-
-            try:
-
-                temp_vc = await guild.create_voice_channel(
-
-                    name=f"{member.display_name}'s Room 🎮",
-
-                    category=category,
-
-                    overwrites=overwrites
-                )
-
-            except discord.Forbidden:
-
-                print(
-                    f"❌ Cannot create temporary VC "
-                    f"in {guild.name}"
-                )
-
+            if category is None:
                 return
 
-            except discord.HTTPException as e:
-
-                print(
-                    f"❌ Discord error creating VC: {e}"
-                )
-
-                return
-
-            # -------------------------------------------------
-            # SAVE TEMP CHANNEL
-            # -------------------------------------------------
-
-            self.temp_channels[
-                temp_vc.id
-            ] = {
-
-                "owner_id": member.id,
-
-                "guild_id": guild.id
-            }
-
-            # -------------------------------------------------
-            # MOVE MEMBER
-            # -------------------------------------------------
-
-            try:
-
-                await member.move_to(
-                    temp_vc
-                )
-
-            except discord.HTTPException:
-
-                pass
-
-            print(
-                f"🎧 Created temp VC "
-                f"{temp_vc.name} "
-                f"for {member}"
-            )
-
-            # -------------------------------------------------
-            # SEND CONTROL PANEL
-            # -------------------------------------------------
-
-            await self.send_control_panel(
+            await self.create_room(
                 member,
-                temp_vc
+                guild,
+                category
             )
 
         # =================================================
-        # DELETE EMPTY TEMP VC
+        # MEMBER LEFT A TEMP VOICE CHANNEL
         # =================================================
 
         if (
@@ -380,95 +222,285 @@ class VoiceSystem(commands.Cog):
             and before.channel.id in self.temp_channels
         ):
 
-            channel = before.channel
+            voice_channel = before.channel
 
-            # Wait a moment because Discord can update
-            # voice membership asynchronously.
-            await discord.utils.sleep_until(
-                discord.utils.utcnow()
-            )
+            # -------------------------------------------------
+            # Check if voice channel is empty
+            # -------------------------------------------------
 
-            if len(channel.members) == 0:
+            if len(voice_channel.members) == 0:
 
-                try:
-
-                    channel_id = channel.id
-
-                    await channel.delete(
-                        reason="Temporary voice channel empty"
-                    )
-
-                    self.temp_channels.pop(
-                        channel_id,
-                        None
-                    )
-
-                    print(
-                        f"🗑️ Deleted empty temp VC: "
-                        f"{channel.name}"
-                    )
-
-                except discord.NotFound:
-
-                    self.temp_channels.pop(
-                        channel.id,
-                        None
-                    )
-
-                except discord.Forbidden:
-
-                    print(
-                        f"❌ Cannot delete temp VC: "
-                        f"{channel.name}"
-                    )
-
-                except discord.HTTPException:
-
-                    pass
+                await self.delete_room(
+                    voice_channel.id,
+                    guild
+                )
 
     # =====================================================
-    # SEND CONTROL PANEL
+    # CREATE TEMPORARY ROOM
+    # =====================================================
+
+    async def create_room(
+        self,
+        member: discord.Member,
+        guild: discord.Guild,
+        category: discord.CategoryChannel
+    ):
+
+        # =================================================
+        # VOICE PERMISSIONS
+        # =================================================
+
+        voice_overwrites = {
+
+            # Everyone can see the room
+            guild.default_role:
+                discord.PermissionOverwrite(
+                    view_channel=True,
+                    connect=True,
+                    speak=True,
+                    stream=True,
+                    use_voice_activation=True
+                ),
+
+            # Owner
+            member:
+                discord.PermissionOverwrite(
+                    view_channel=True,
+                    connect=True,
+                    speak=True,
+                    stream=True,
+                    use_voice_activation=True,
+
+                    manage_channels=True,
+                    move_members=True,
+                    mute_members=True,
+                    deafen_members=True
+                )
+        }
+
+        # =================================================
+        # CREATE VOICE CHANNEL
+        # =================================================
+
+        try:
+
+            voice_channel = await guild.create_voice_channel(
+
+                name=f"{member.display_name}'s Room 🎮",
+
+                category=category,
+
+                overwrites=voice_overwrites,
+
+                reason=(
+                    f"Temporary voice room "
+                    f"for {member}"
+                )
+            )
+
+        except discord.Forbidden:
+
+            print(
+                f"❌ Cannot create voice channel "
+                f"in {guild.name}"
+            )
+
+            return
+
+        except discord.HTTPException as e:
+
+            print(
+                f"❌ Error creating voice channel: {e}"
+            )
+
+            return
+
+        # =================================================
+        # TEXT CHANNEL PERMISSIONS
+        # =================================================
+
+        text_overwrites = {
+
+            # Everyone cannot see
+            guild.default_role:
+                discord.PermissionOverwrite(
+                    view_channel=False
+                ),
+
+            # Owner
+            member:
+                discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    attach_files=True,
+                    embed_links=True
+                )
+        }
+
+        # =================================================
+        # GIVE MODERATORS ACCESS
+        # =================================================
+
+        # If your server has a Moderator role, add it here.
+        moderator_role_names = [
+            "Moderator",
+            "Moderators",
+            "Mod"
+        ]
+
+        for role in guild.roles:
+
+            if role.name in moderator_role_names:
+
+                text_overwrites[role] = (
+                    discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True,
+                        read_message_history=True,
+                        attach_files=True,
+                        embed_links=True
+                    )
+                )
+
+                voice_overwrites[role] = (
+                    discord.PermissionOverwrite(
+                        view_channel=True,
+                        connect=True,
+                        speak=True,
+                        stream=True,
+                        use_voice_activation=True
+                    )
+                )
+
+        # =================================================
+        # CREATE TEMPORARY TEXT CHANNEL
+        # =================================================
+
+        try:
+
+            text_channel = await guild.create_text_channel(
+
+                name=f"room-{member.display_name.lower()}",
+
+                category=category,
+
+                overwrites=text_overwrites,
+
+                topic=(
+                    f"Temporary control room for "
+                    f"{member} ({member.id})"
+                ),
+
+                reason=(
+                    f"Temporary control channel "
+                    f"for {member}"
+                )
+            )
+
+        except discord.Forbidden:
+
+            # If text channel fails, remove voice channel
+            try:
+                await voice_channel.delete(
+                    reason="Failed to create control channel"
+                )
+            except:
+                pass
+
+            print(
+                f"❌ Cannot create control channel "
+                f"for {member}"
+            )
+
+            return
+
+        except discord.HTTPException:
+
+            try:
+                await voice_channel.delete(
+                    reason="Failed to create control channel"
+                )
+            except:
+                pass
+
+            return
+
+        # =================================================
+        # SAVE ROOM DATA
+        # =================================================
+
+        self.temp_channels[
+            voice_channel.id
+        ] = {
+
+            "owner_id": member.id,
+
+            "guild_id": guild.id,
+
+            "text_channel_id": text_channel.id
+        }
+
+        # =================================================
+        # MOVE MEMBER
+        # =================================================
+
+        try:
+
+            await member.move_to(
+                voice_channel
+            )
+
+        except discord.HTTPException:
+
+            pass
+
+        # =================================================
+        # SEND CONTROL PANEL
+        # =================================================
+
+        await self.send_control_panel(
+            member,
+            voice_channel,
+            text_channel
+        )
+
+        print(
+            f"🎧 Created room for {member.display_name}\n"
+            f"   Voice: {voice_channel.name}\n"
+            f"   Text: {text_channel.name}"
+        )
+
+    # =====================================================
+    # CONTROL PANEL
     # =====================================================
 
     async def send_control_panel(
         self,
         owner: discord.Member,
-        voice_channel: discord.VoiceChannel
+        voice_channel: discord.VoiceChannel,
+        text_channel: discord.TextChannel
     ):
 
         guild = owner.guild
 
-        guild_config = self.config.get(
-            str(guild.id),
-            {}
-        )
-
-        control_channel_id = guild_config.get(
-            "control_channel_id"
-        )
-
-        if not control_channel_id:
-
-            return
-
-        control_channel = guild.get_channel(
-            control_channel_id
-        )
-
-        if control_channel is None:
-
-            return
-
         embed = discord.Embed(
             title="🎧 Your Voice Room",
             description=(
-                f"{owner.mention}, your temporary voice "
-                f"channel has been created!\n\n"
+                f"Welcome {owner.mention}!\n\n"
 
-                f"🎤 **Channel:** "
+                f"🎤 **Voice Room:** "
                 f"{voice_channel.mention}\n\n"
 
-                "Use the buttons below to manage your room."
+                "Use the buttons below to manage your "
+                "temporary voice room.\n\n"
+
+                "✏️ **Rename** — Change the room name\n"
+                "👥 **Limit** — Set maximum users\n"
+                "🔗 **Invite** — Create an invite\n"
+                "🔒 **Lock** — Prevent new users joining\n"
+                "👑 **Transfer** — Give ownership to another member\n"
+                "🗑️ **Delete** — Delete your room"
             ),
             color=discord.Color.blurple()
         )
@@ -486,8 +518,8 @@ class VoiceSystem(commands.Cog):
         )
 
         embed.add_field(
-            name="👥 Members",
-            value="No limit",
+            name="👥 User Limit",
+            value="Unlimited",
             inline=True
         )
 
@@ -498,7 +530,7 @@ class VoiceSystem(commands.Cog):
         )
 
         embed.set_footer(
-            text=f"{guild.name} • Voice Room",
+            text=f"{guild.name} • Temporary Voice Room",
             icon_url=(
                 guild.icon.url
                 if guild.icon
@@ -508,25 +540,31 @@ class VoiceSystem(commands.Cog):
 
         try:
 
-            await control_channel.send(
+            await text_channel.send(
+
                 content=owner.mention,
+
                 embed=embed,
+
                 view=VoiceControlView(
                     self,
                     voice_channel.id,
                     owner.id
                 ),
+
                 allowed_mentions=discord.AllowedMentions(
                     users=True
                 )
             )
 
-        except discord.HTTPException:
+        except discord.HTTPException as e:
 
-            pass
+            print(
+                f"❌ Could not send control panel: {e}"
+            )
 
     # =====================================================
-    # CHECK OWNERSHIP
+    # CHECK OWNER
     # =====================================================
 
     def is_owner(
@@ -535,21 +573,20 @@ class VoiceSystem(commands.Cog):
         channel_id: int
     ):
 
-        channel_info = self.temp_channels.get(
+        room = self.temp_channels.get(
             channel_id
         )
 
-        if not channel_info:
-
+        if not room:
             return False
 
         return (
-            channel_info["owner_id"]
+            room["owner_id"]
             == member.id
         )
 
     # =====================================================
-    # RENAME CHANNEL
+    # RENAME
     # =====================================================
 
     async def rename_channel(
@@ -565,7 +602,7 @@ class VoiceSystem(commands.Cog):
         ):
 
             await interaction.response.send_message(
-                "❌ Only the owner of this room can rename it.",
+                "❌ Only the room owner can rename this channel.",
                 ephemeral=True
             )
 
@@ -578,19 +615,19 @@ class VoiceSystem(commands.Cog):
             )
 
             await interaction.response.send_message(
-                f"✅ Voice room renamed to **{new_name}**.",
+                f"✅ Room renamed to **{new_name}**.",
                 ephemeral=True
             )
 
         except discord.Forbidden:
 
             await interaction.response.send_message(
-                "❌ I don't have permission to rename this channel.",
+                "❌ I don't have permission to rename this room.",
                 ephemeral=True
             )
 
     # =====================================================
-    # SET USER LIMIT
+    # USER LIMIT
     # =====================================================
 
     async def set_limit(
@@ -606,7 +643,7 @@ class VoiceSystem(commands.Cog):
         ):
 
             await interaction.response.send_message(
-                "❌ Only the owner can change the user limit.",
+                "❌ Only the room owner can change the limit.",
                 ephemeral=True
             )
 
@@ -620,21 +657,71 @@ class VoiceSystem(commands.Cog):
 
             if limit == 0:
 
-                text = "unlimited"
+                display_limit = "Unlimited"
 
             else:
 
-                text = str(limit)
+                display_limit = str(limit)
 
             await interaction.response.send_message(
-                f"✅ User limit set to **{text}**.",
+                f"✅ User limit set to **{display_limit}**.",
                 ephemeral=True
             )
 
         except discord.Forbidden:
 
             await interaction.response.send_message(
-                "❌ I cannot change the channel limit.",
+                "❌ I cannot change the user limit.",
+                ephemeral=True
+            )
+
+    # =====================================================
+    # CREATE INVITE
+    # =====================================================
+
+    async def create_invite(
+        self,
+        interaction,
+        channel
+    ):
+
+        if not self.is_owner(
+            interaction.user,
+            channel.id
+        ):
+
+            await interaction.response.send_message(
+                "❌ Only the room owner can create an invite.",
+                ephemeral=True
+            )
+
+            return
+
+        try:
+
+            invite = await channel.create_invite(
+                max_age=0,
+                max_uses=0,
+                unique=True
+            )
+
+            await interaction.response.send_message(
+                f"🔗 **Your voice room invite:**\n\n"
+                f"{invite.url}",
+                ephemeral=True
+            )
+
+        except discord.Forbidden:
+
+            await interaction.response.send_message(
+                "❌ I cannot create an invite for this room.",
+                ephemeral=True
+            )
+
+        except discord.HTTPException:
+
+            await interaction.response.send_message(
+                "❌ Discord could not create the invite.",
                 ephemeral=True
             )
 
@@ -654,7 +741,7 @@ class VoiceSystem(commands.Cog):
         ):
 
             await interaction.response.send_message(
-                "❌ Only the owner can lock this room.",
+                "❌ Only the room owner can lock this room.",
                 ephemeral=True
             )
 
@@ -662,19 +749,17 @@ class VoiceSystem(commands.Cog):
 
         everyone = interaction.guild.default_role
 
-        current_permissions = (
-            channel.overwrites_for(
-                everyone
-            )
+        permissions = channel.overwrites_for(
+            everyone
         )
 
-        currently_locked = (
-            current_permissions.connect is False
+        is_locked = (
+            permissions.connect is False
         )
 
         try:
 
-            if currently_locked:
+            if is_locked:
 
                 await channel.set_permissions(
                     everyone,
@@ -693,7 +778,7 @@ class VoiceSystem(commands.Cog):
                     connect=False
                 )
 
-                # Keep owner connected
+                # Make sure owner remains connected
                 await channel.set_permissions(
                     interaction.user,
                     connect=True
@@ -707,108 +792,7 @@ class VoiceSystem(commands.Cog):
         except discord.Forbidden:
 
             await interaction.response.send_message(
-                "❌ I cannot change the channel permissions.",
-                ephemeral=True
-            )
-
-    # =====================================================
-    # DELETE VOICE CHANNEL
-    # =====================================================
-
-    async def delete_channel(
-        self,
-        interaction,
-        channel
-    ):
-
-        if not self.is_owner(
-            interaction.user,
-            channel.id
-        ):
-
-            await interaction.response.send_message(
-                "❌ Only the owner can delete this room.",
-                ephemeral=True
-            )
-
-            return
-
-        await interaction.response.send_message(
-            "🗑️ Deleting your voice room...",
-            ephemeral=True
-        )
-
-        try:
-
-            channel_id = channel.id
-
-            await channel.delete(
-                reason=(
-                    f"Voice room deleted by "
-                    f"{interaction.user}"
-                )
-            )
-
-            self.temp_channels.pop(
-                channel_id,
-                None
-            )
-
-        except discord.HTTPException:
-
-            pass
-
-    # =====================================================
-    # CREATE INVITE
-    # =====================================================
-
-    async def create_invite(
-        self,
-        interaction,
-        channel
-    ):
-
-        if not self.is_owner(
-            interaction.user,
-            channel.id
-        ):
-
-            await interaction.response.send_message(
-                "❌ Only the owner can create an invite.",
-                ephemeral=True
-            )
-
-            return
-
-        try:
-
-            invite = await channel.create_invite(
-                max_age=0,
-                max_uses=0,
-                unique=True,
-                reason=(
-                    f"Voice invite created by "
-                    f"{interaction.user}"
-                )
-            )
-
-            await interaction.response.send_message(
-                f"🔗 **Your voice room invite:**\n\n"
-                f"{invite.url}",
-                ephemeral=True
-            )
-
-        except discord.Forbidden:
-
-            await interaction.response.send_message(
-                "❌ I cannot create an invite for this channel.",
-                ephemeral=True
-            )
-
-        except discord.HTTPException:
-
-            await interaction.response.send_message(
-                "❌ Discord could not create the invite.",
+                "❌ I cannot change the room permissions.",
                 ephemeral=True
             )
 
@@ -844,16 +828,18 @@ class VoiceSystem(commands.Cog):
 
             return
 
-        # Update owner
+        old_owner = interaction.user
+
+        # Update stored owner
         self.temp_channels[
             channel.id
         ]["owner_id"] = new_owner.id
 
         try:
 
-            # Remove old owner permissions
+            # Remove old owner-specific permissions
             await channel.set_permissions(
-                interaction.user,
+                old_owner,
                 overwrite=None
             )
 
@@ -879,13 +865,121 @@ class VoiceSystem(commands.Cog):
 
         except discord.Forbidden:
 
+            # Restore ownership if Discord rejects change
+            self.temp_channels[
+                channel.id
+            ]["owner_id"] = old_owner.id
+
             await interaction.response.send_message(
-                "❌ I cannot transfer ownership.",
+                "❌ I couldn't transfer ownership.",
                 ephemeral=True
             )
 
     # =====================================================
-    # /VOICESTATUS
+    # DELETE ROOM
+    # =====================================================
+
+    async def delete_room(
+        self,
+        channel_id,
+        guild
+    ):
+
+        room = self.temp_channels.get(
+            channel_id
+        )
+
+        if not room:
+            return
+
+        voice_channel = guild.get_channel(
+            channel_id
+        )
+
+        text_channel_id = room.get(
+            "text_channel_id"
+        )
+
+        text_channel = None
+
+        if text_channel_id:
+
+            text_channel = guild.get_channel(
+                text_channel_id
+            )
+
+        # Remove from memory first
+        self.temp_channels.pop(
+            channel_id,
+            None
+        )
+
+        # =================================================
+        # DELETE TEXT CHANNEL
+        # =================================================
+
+        if text_channel:
+
+            try:
+
+                await text_channel.delete(
+                    reason="Temporary voice room closed"
+                )
+
+                print(
+                    f"🗑️ Deleted control channel: "
+                    f"{text_channel.name}"
+                )
+
+            except discord.NotFound:
+
+                pass
+
+            except discord.Forbidden:
+
+                print(
+                    f"❌ Cannot delete control channel "
+                    f"{text_channel.name}"
+                )
+
+            except discord.HTTPException:
+
+                pass
+
+        # =================================================
+        # DELETE VOICE CHANNEL
+        # =================================================
+
+        if voice_channel:
+
+            try:
+
+                await voice_channel.delete(
+                    reason="Temporary voice room empty"
+                )
+
+                print(
+                    f"🗑️ Deleted voice channel: "
+                    f"{voice_channel.name}"
+                )
+
+            except discord.NotFound:
+
+                pass
+
+            except discord.Forbidden:
+
+                print(
+                    f"❌ Cannot delete voice channel "
+                    f"{voice_channel.name}"
+                )
+
+            except discord.HTTPException:
+
+                pass
+
+    # =====================================================
+    # VOICESTATUS
     # =====================================================
 
     @app_commands.command(
@@ -925,22 +1019,18 @@ class VoiceSystem(commands.Cog):
             return
 
         join_channel = guild.get_channel(
-            config.get(
-                "join_channel_id"
-            )
+            config.get("join_channel_id")
         )
 
         category = guild.get_channel(
-            config.get(
-                "category_id"
-            )
+            config.get("category_id")
         )
 
-        control_channel = guild.get_channel(
-            config.get(
-                "control_channel_id"
-            )
-        )
+        active_rooms = [
+            room
+            for room in self.temp_channels.values()
+            if room["guild_id"] == guild.id
+        ]
 
         await interaction.response.send_message(
 
@@ -952,17 +1042,14 @@ class VoiceSystem(commands.Cog):
             f"📂 **Category:** "
             f"{category.name if category else 'Missing'}\n"
 
-            f"⚙️ **Control Channel:** "
-            f"{control_channel.mention if control_channel else 'Missing'}\n"
-
             f"🎧 **Active Rooms:** "
-            f"`{len([c for c in self.temp_channels.values() if c['guild_id'] == guild.id])}`",
+            f"`{len(active_rooms)}`",
 
             ephemeral=True
         )
 
     # =====================================================
-    # ERROR HANDLER
+    # SETUP ERROR
     # =====================================================
 
     @setupvoice.error
@@ -1017,8 +1104,8 @@ class VoiceControlView(
     )
     async def rename(
         self,
-        interaction,
-        button
+        interaction: discord.Interaction,
+        button: discord.ui.Button
     ):
 
         channel = interaction.guild.get_channel(
@@ -1042,7 +1129,7 @@ class VoiceControlView(
         )
 
     # =====================================================
-    # USER LIMIT
+    # LIMIT
     # =====================================================
 
     @discord.ui.button(
@@ -1052,8 +1139,8 @@ class VoiceControlView(
     )
     async def limit(
         self,
-        interaction,
-        button
+        interaction: discord.Interaction,
+        button: discord.ui.Button
     ):
 
         channel = interaction.guild.get_channel(
@@ -1087,8 +1174,8 @@ class VoiceControlView(
     )
     async def invite(
         self,
-        interaction,
-        button
+        interaction: discord.Interaction,
+        button: discord.ui.Button
     ):
 
         channel = interaction.guild.get_channel(
@@ -1120,8 +1207,8 @@ class VoiceControlView(
     )
     async def lock(
         self,
-        interaction,
-        button
+        interaction: discord.Interaction,
+        button: discord.ui.Button
     ):
 
         channel = interaction.guild.get_channel(
@@ -1143,18 +1230,18 @@ class VoiceControlView(
         )
 
     # =====================================================
-    # DELETE
+    # TRANSFER
     # =====================================================
 
     @discord.ui.button(
-        label="Delete",
-        emoji="🗑️",
-        style=discord.ButtonStyle.danger
+        label="Transfer",
+        emoji="👑",
+        style=discord.ButtonStyle.secondary
     )
-    async def delete(
+    async def transfer(
         self,
-        interaction,
-        button
+        interaction: discord.Interaction,
+        button: discord.ui.Button
     ):
 
         channel = interaction.guild.get_channel(
@@ -1170,9 +1257,60 @@ class VoiceControlView(
 
             return
 
-        await self.cog.delete_channel(
-            interaction,
-            channel
+        await interaction.response.send_message(
+            "👑 Use `/transfer` is not enabled in this version.\n"
+            "You can add a member-selection menu if required.",
+            ephemeral=True
+        )
+
+    # =====================================================
+    # DELETE
+    # =====================================================
+
+    @discord.ui.button(
+        label="Delete",
+        emoji="🗑️",
+        style=discord.ButtonStyle.danger
+    )
+    async def delete(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        channel = interaction.guild.get_channel(
+            self.channel_id
+        )
+
+        if channel is None:
+
+            await interaction.response.send_message(
+                "❌ This voice room no longer exists.",
+                ephemeral=True
+            )
+
+            return
+
+        if not self.cog.is_owner(
+            interaction.user,
+            channel.id
+        ):
+
+            await interaction.response.send_message(
+                "❌ Only the room owner can delete this room.",
+                ephemeral=True
+            )
+
+            return
+
+        await interaction.response.send_message(
+            "🗑️ Deleting your temporary room...",
+            ephemeral=True
+        )
+
+        await self.cog.delete_room(
+            channel.id,
+            interaction.guild
         )
 
 
@@ -1198,7 +1336,7 @@ class RenameModal(
         self.channel = channel
 
         self.name_input = discord.ui.TextInput(
-            label="New channel name",
+            label="New room name",
             placeholder="Gaming Room",
             max_length=100,
             required=True
@@ -1210,13 +1348,15 @@ class RenameModal(
 
     async def on_submit(
         self,
-        interaction
+        interaction: discord.Interaction
     ):
 
         await self.cog.rename_channel(
             interaction,
             self.channel,
-            str(self.name_input.value)
+            str(
+                self.name_input.value
+            )
         )
 
 
@@ -1254,7 +1394,7 @@ class LimitModal(
 
     async def on_submit(
         self,
-        interaction
+        interaction: discord.Interaction
     ):
 
         try:
