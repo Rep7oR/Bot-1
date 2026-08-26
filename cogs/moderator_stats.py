@@ -14,7 +14,7 @@ MODERATOR_ROLE_NAME = "MODERATOR"
 
 DATA_FILE = "moderator_stats.json"
 
-UPDATE_INTERVAL = 30
+UPDATE_INTERVAL = 15
 
 
 # ============================================================
