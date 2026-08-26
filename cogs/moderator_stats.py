@@ -10,7 +10,7 @@ import os
 # CONFIGURATION
 # ============================================================
 
-MODERATOR_ROLE_NAME = "Moderator"
+MODERATOR_ROLE_NAME = "MODERATOR"
 
 DATA_FILE = "moderator_stats.json"
 
