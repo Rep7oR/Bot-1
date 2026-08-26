@@ -1396,7 +1396,347 @@ class ClanManager(commands.Cog):
                 ephemeral=True
             )
 
+# ============================================================
+# DELETE CLAN CONFIRMATION
+# ============================================================
 
+class DeleteClanConfirmView(ui.View):
+
+    def __init__(
+        self,
+        clan_category: discord.CategoryChannel,
+        moderator: discord.Member
+    ):
+        super().__init__(timeout=60)
+
+        self.clan_category = clan_category
+        self.moderator = moderator
+
+    @ui.button(
+        label="Delete Clan",
+        style=discord.ButtonStyle.danger,
+        emoji="🗑️"
+    )
+    async def confirm_delete(
+        self,
+        interaction: discord.Interaction,
+        button: ui.Button
+    ):
+
+        # Make sure only the moderator who started
+        # the deletion can confirm it
+        if interaction.user.id != self.moderator.id:
+
+            await interaction.response.send_message(
+                "❌ Only the moderator who started this "
+                "deletion can confirm it.",
+                ephemeral=True
+            )
+
+            return
+
+        # Check Moderator role
+        if not is_moderator(interaction.user):
+
+            await interaction.response.send_message(
+                f"❌ You need the "
+                f"**{MODERATOR_ROLE_NAME}** role.",
+                ephemeral=True
+            )
+
+            return
+
+        await interaction.response.defer(
+            ephemeral=True
+        )
+
+        guild = interaction.guild
+
+        if guild is None:
+            return
+
+        category = self.clan_category
+
+        if category not in guild.categories:
+
+            await interaction.followup.send(
+                "❌ This clan category no longer exists.",
+                ephemeral=True
+            )
+
+            return
+
+        category_name = category.name
+
+        # ====================================================
+        # FIND LEADER CATEGORY
+        # ====================================================
+
+        leader_category_name = (
+            f"{category_name} - LEADERS"
+        )
+
+        leader_category = discord.utils.get(
+            guild.categories,
+            name=leader_category_name
+        )
+
+        # ====================================================
+        # FIND ROLES
+        # ====================================================
+
+        roles_to_delete = []
+
+        # Look through permissions of the clan category
+        # and its channels to identify clan roles.
+
+        possible_roles = set()
+
+        for channel in category.channels:
+
+            for target in channel.overwrites:
+
+                if isinstance(
+                    target,
+                    discord.Role
+                ):
+
+                    if target != guild.default_role:
+
+                        possible_roles.add(target)
+
+        if leader_category:
+
+            for channel in leader_category.channels:
+
+                for target in channel.overwrites:
+
+                    if isinstance(
+                        target,
+                        discord.Role
+                    ):
+
+                        if target != guild.default_role:
+
+                            possible_roles.add(target)
+
+        roles_to_delete = list(
+            possible_roles
+        )
+
+        # ====================================================
+        # DELETE MAIN CLAN CHANNELS
+        # ====================================================
+
+        deleted_channels = 0
+
+        for channel in list(
+            category.channels
+        ):
+
+            try:
+
+                await channel.delete(
+                    reason=(
+                        f"Clan deleted by "
+                        f"{interaction.user}"
+                    )
+                )
+
+                deleted_channels += 1
+
+            except discord.Forbidden:
+
+                print(
+                    f"❌ Could not delete channel "
+                    f"{channel.name}"
+                )
+
+        # ====================================================
+        # DELETE MAIN CATEGORY
+        # ====================================================
+
+        try:
+
+            await category.delete(
+                reason=(
+                    f"Clan deleted by "
+                    f"{interaction.user}"
+                )
+            )
+
+        except discord.Forbidden:
+
+            await interaction.followup.send(
+                "❌ I couldn't delete the clan category. "
+                "Make sure the bot has **Manage Channels**.",
+                ephemeral=True
+            )
+
+            return
+
+        # ====================================================
+        # DELETE LEADER CATEGORY
+        # ====================================================
+
+        deleted_leader_channels = 0
+
+        if leader_category:
+
+            for channel in list(
+                leader_category.channels
+            ):
+
+                try:
+
+                    await channel.delete(
+                        reason=(
+                            f"Clan deleted by "
+                            f"{interaction.user}"
+                        )
+                    )
+
+                    deleted_leader_channels += 1
+
+                except discord.Forbidden:
+
+                    print(
+                        f"❌ Could not delete "
+                        f"leader channel {channel.name}"
+                    )
+
+            try:
+
+                await leader_category.delete(
+                    reason=(
+                        f"Clan deleted by "
+                        f"{interaction.user}"
+                    )
+                )
+
+            except discord.Forbidden:
+
+                print(
+                    "❌ Could not delete leader category"
+                )
+
+        # ====================================================
+        # DELETE CLAN ROLES
+        # ====================================================
+
+        deleted_roles = 0
+
+        for role in roles_to_delete:
+
+            try:
+
+                # Never delete @everyone
+                if role == guild.default_role:
+                    continue
+
+                # Never delete the bot's own role
+                if role >= guild.me.top_role:
+                    continue
+
+                await role.delete(
+                    reason=(
+                        f"Clan deleted by "
+                        f"{interaction.user}"
+                    )
+                )
+
+                deleted_roles += 1
+
+            except discord.Forbidden:
+
+                print(
+                    f"❌ Could not delete role "
+                    f"{role.name}"
+                )
+
+        # ====================================================
+        # DISABLE BUTTONS
+        # ====================================================
+
+        for child in self.children:
+
+            child.disabled = True
+
+        # ====================================================
+        # UPDATE MESSAGE
+        # ====================================================
+
+        deleted_embed = discord.Embed(
+            title="🗑️ Clan Deleted",
+            description=(
+                f"**{category_name}** has been "
+                "completely deleted."
+            ),
+            color=discord.Color.red()
+        )
+
+        deleted_embed.add_field(
+            name="👤 Deleted By",
+            value=interaction.user.mention,
+            inline=True
+        )
+
+        deleted_embed.add_field(
+            name="💬 Channels",
+            value=str(
+                deleted_channels +
+                deleted_leader_channels
+            ),
+            inline=True
+        )
+
+        deleted_embed.add_field(
+            name="🎭 Roles",
+            value=str(
+                deleted_roles
+            ),
+            inline=True
+        )
+
+        await interaction.edit_original_response(
+            embed=deleted_embed,
+            view=self
+        )
+
+        # Stop this view
+        self.stop()
+
+    # ========================================================
+    # CANCEL
+    # ========================================================
+
+    @ui.button(
+        label="Cancel",
+        style=discord.ButtonStyle.secondary,
+        emoji="↩️"
+    )
+    async def cancel_delete(
+        self,
+        interaction: discord.Interaction,
+        button: ui.Button
+    ):
+
+        if interaction.user.id != self.moderator.id:
+
+            await interaction.response.send_message(
+                "❌ Only the moderator who started this "
+                "deletion can cancel it.",
+                ephemeral=True
+            )
+
+            return
+
+        await interaction.response.send_message(
+            "✅ Clan deletion cancelled.",
+            ephemeral=True
+        )
+
+        self.stop()
 # ============================================================
 # COG SETUP
 # ============================================================
