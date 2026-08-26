@@ -14,6 +14,7 @@ MODERATOR_ROLE_NAME = "MODERATOR"
 
 DATA_FILE = "moderator_online.json"
 
+# Backup refresh every 15 seconds
 UPDATE_INTERVAL = 15
 
 
@@ -29,13 +30,11 @@ def load_data():
         }
 
     try:
-
         with open(
             DATA_FILE,
             "r",
             encoding="utf-8"
         ) as f:
-
             return json.load(f)
 
     except Exception as e:
@@ -113,9 +112,7 @@ def is_moderator(
 # MODERATOR ONLINE COG
 # ============================================================
 
-class ModeratorOnline(
-    commands.Cog
-):
+class ModeratorOnline(commands.Cog):
 
     def __init__(
         self,
@@ -124,6 +121,7 @@ class ModeratorOnline(
 
         self.bot = bot
 
+        # Start backup updater
         self.update_moderator_counter.start()
 
     # ========================================================
@@ -142,11 +140,115 @@ class ModeratorOnline(
     async def on_ready(self):
 
         print(
-            "✅ Moderator online counter started"
+            "✅ Moderator online counter is running"
         )
 
+        # Update immediately when bot becomes ready
+        for guild in self.bot.guilds:
+
+            try:
+
+                await self.update_guild(guild)
+
+            except Exception as e:
+
+                print(
+                    f"[MOD ONLINE] Initial update error "
+                    f"in {guild.name}: {e}"
+                )
+
     # ========================================================
-    # UPDATE LOOP
+    # MEMBER PRESENCE UPDATE
+    #
+    # This makes the counter update immediately when
+    # Discord tells the bot that somebody changed status.
+    # ========================================================
+
+    @commands.Cog.listener()
+    async def on_presence_update(
+        self,
+        before: discord.Member,
+        after: discord.Member
+    ):
+
+        # Only care about moderators
+        if not is_moderator(after):
+            return
+
+        # If their status didn't actually change,
+        # don't waste an API request.
+        if before.status == after.status:
+            return
+
+        try:
+
+            await self.update_guild(
+                after.guild
+            )
+
+        except Exception as e:
+
+            print(
+                f"[MOD ONLINE] Presence update error: {e}"
+            )
+
+    # ========================================================
+    # ROLE UPDATE
+    #
+    # If somebody becomes/removes Moderator role,
+    # immediately update the counter.
+    # ========================================================
+
+    @commands.Cog.listener()
+    async def on_member_update(
+        self,
+        before: discord.Member,
+        after: discord.Member
+    ):
+
+        before_roles = {
+            role.id
+            for role in before.roles
+        }
+
+        after_roles = {
+            role.id
+            for role in after.roles
+        }
+
+        # No role change
+        if before_roles == after_roles:
+            return
+
+        moderator_role = discord.utils.get(
+            after.guild.roles,
+            name=MODERATOR_ROLE_NAME
+        )
+
+        if moderator_role is None:
+            return
+
+        # Only update if Moderator role was involved
+        if (
+            moderator_role.id not in before_roles
+            and moderator_role.id not in after_roles
+        ):
+            return
+
+        try:
+
+            await self.update_guild(
+                after.guild
+            )
+
+        except Exception as e:
+
+            print(
+                f"[MOD ONLINE] Role update error: {e}"
+            )
+
+    # ========================================================
+    # BACKUP 15 SECOND LOOP
     # ========================================================
 
     @tasks.loop(seconds=UPDATE_INTERVAL)
@@ -168,7 +270,7 @@ class ModeratorOnline(
                 )
 
     # ========================================================
-    # WAIT FOR BOT
+    # WAIT UNTIL BOT READY
     # ========================================================
 
     @update_moderator_counter.before_loop
@@ -193,29 +295,55 @@ class ModeratorOnline(
         )
 
         if moderator_role is None:
+
+            print(
+                f"[MOD ONLINE] "
+                f"Role '{MODERATOR_ROLE_NAME}' "
+                f"not found in {guild.name}"
+            )
+
             return 0
 
         online_count = 0
 
         for member in moderator_role.members:
 
-            # Offline
-            if member.status == discord.Status.offline:
+            # ------------------------------------------------
+            # ONLINE
+            # ------------------------------------------------
+
+            if member.status == discord.Status.online:
+
+                online_count += 1
+
+            # ------------------------------------------------
+            # IDLE
+            # ------------------------------------------------
+
+            elif member.status == discord.Status.idle:
+
+                online_count += 1
+
+            # ------------------------------------------------
+            # DO NOT COUNT OFFLINE
+            # ------------------------------------------------
+
+            elif member.status == discord.Status.offline:
+
                 continue
 
-            # Online / Idle / DND
-            if member.status in (
-                discord.Status.online,
-                discord.Status.idle,
-                discord.Status.dnd
-            ):
+            # ------------------------------------------------
+            # DND
+            # ------------------------------------------------
+
+            elif member.status == discord.Status.dnd:
 
                 online_count += 1
 
         return online_count
 
     # ========================================================
-    # UPDATE SERVER
+    # UPDATE ONE GUILD
     # ========================================================
 
     async def update_guild(
@@ -231,6 +359,7 @@ class ModeratorOnline(
             "channel_id"
         )
 
+        # No channel configured
         if not channel_id:
             return
 
@@ -238,9 +367,9 @@ class ModeratorOnline(
             channel_id
         )
 
+        # Channel deleted
         if channel is None:
 
-            # Channel was deleted
             guild_data[
                 "channel_id"
             ] = None
@@ -250,7 +379,7 @@ class ModeratorOnline(
             return
 
         # ----------------------------------------------------
-        # COUNT
+        # COUNT MODERATORS
         # ----------------------------------------------------
 
         online_count = (
@@ -260,7 +389,7 @@ class ModeratorOnline(
         )
 
         # ----------------------------------------------------
-        # CHANNEL NAME
+        # NEW CHANNEL NAME
         # ----------------------------------------------------
 
         new_name = (
@@ -269,36 +398,45 @@ class ModeratorOnline(
         )
 
         # ----------------------------------------------------
-        # ONLY EDIT IF NECESSARY
+        # ONLY RENAME WHEN NUMBER CHANGES
         # ----------------------------------------------------
 
-        if channel.name != new_name:
+        if channel.name == new_name:
 
-            try:
+            return
 
-                await channel.edit(
-                    name=new_name,
-                    reason=(
-                        "Updating live moderator count"
-                    )
+        try:
+
+            await channel.edit(
+                name=new_name,
+                reason=(
+                    "Updating live moderator count"
                 )
+            )
 
-            except discord.Forbidden:
+            print(
+                f"[MOD ONLINE] "
+                f"{guild.name}: "
+                f"{new_name}"
+            )
 
-                print(
-                    f"[MOD ONLINE] Missing "
-                    f"Manage Channels permission "
-                    f"in {guild.name}"
-                )
+        except discord.Forbidden:
 
-            except discord.HTTPException as e:
+            print(
+                f"[MOD ONLINE] ❌ Missing "
+                f"Manage Channels permission "
+                f"in {guild.name}"
+            )
 
-                print(
-                    f"[MOD ONLINE] Discord error: {e}"
-                )
+        except discord.HTTPException as e:
+
+            print(
+                f"[MOD ONLINE] ❌ Discord error: "
+                f"{e}"
+            )
 
     # ========================================================
-    # SET MODERATOR COUNTER CHANNEL
+    # SET COUNTER CHANNEL
     # ========================================================
 
     @app_commands.command(
@@ -310,8 +448,8 @@ class ModeratorOnline(
     )
     @app_commands.describe(
         channel=(
-            "Voice channel that will display "
-            "the online moderator count"
+            "Voice channel that displays "
+            "online moderators"
         )
     )
     async def setmoderatorcounter(
@@ -363,7 +501,7 @@ class ModeratorOnline(
         save_data()
 
         # ----------------------------------------------------
-        # UPDATE IMMEDIATELY
+        # COUNT NOW
         # ----------------------------------------------------
 
         online_count = (
@@ -391,14 +529,15 @@ class ModeratorOnline(
 
             await interaction.response.send_message(
                 "❌ I don't have permission to "
-                "rename this channel.",
+                "rename this channel.\n\n"
+                "Give the bot **Manage Channels**.",
                 ephemeral=True
             )
 
             return
 
         # ----------------------------------------------------
-        # MAKE CHANNEL NON-JOINABLE
+        # PREVENT MEMBERS JOINING
         # ----------------------------------------------------
 
         try:
@@ -420,8 +559,8 @@ class ModeratorOnline(
         embed = discord.Embed(
             title="🟢 Moderator Counter Configured",
             description=(
-                f"Live moderator count is now displayed in "
-                f"{channel.mention}."
+                f"Live moderator count is now displayed "
+                f"in {channel.mention}."
             ),
             color=discord.Color.green()
         )
@@ -435,8 +574,14 @@ class ModeratorOnline(
         )
 
         embed.add_field(
-            name="Update Frequency",
-            value=f"Every {UPDATE_INTERVAL} seconds",
+            name="Backup Update",
+            value="Every 15 seconds",
+            inline=True
+        )
+
+        embed.add_field(
+            name="Live Update",
+            value="Presence changes",
             inline=True
         )
 
@@ -456,7 +601,7 @@ class ModeratorOnline(
     @app_commands.command(
         name="removemoderatorcounter",
         description=(
-            "Stop using the moderator online counter"
+            "Disable the moderator online counter"
         )
     )
     async def removemoderatorcounter(
