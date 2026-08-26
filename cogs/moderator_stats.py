@@ -14,6 +14,7 @@ MODERATOR_ROLE_NAME = "MODERATOR"
 
 DATA_FILE = "moderator_stats.json"
 
+# Backup check
 UPDATE_INTERVAL = 15
 
 
@@ -108,14 +109,13 @@ def is_moderator(
     )
 
     if role is None:
-
         return False
 
     return role in member.roles
 
 
 # ============================================================
-# MODERATOR STATISTICS COG
+# MODERATOR STATISTICS
 # ============================================================
 
 class ModeratorStats(
@@ -150,8 +150,24 @@ class ModeratorStats(
             "✅ Moderator statistics system online"
         )
 
+        # Update immediately
+        for guild in self.bot.guilds:
+
+            try:
+
+                await self.update_guild(
+                    guild
+                )
+
+            except Exception as e:
+
+                print(
+                    f"[MOD STATS] Initial update error "
+                    f"in {guild.name}: {e}"
+                )
+
     # ========================================================
-    # UPDATE VOICE CHANNELS
+    # BACKUP LOOP
     # ========================================================
 
     @tasks.loop(seconds=UPDATE_INTERVAL)
@@ -173,16 +189,23 @@ class ModeratorStats(
                 )
 
     # ========================================================
-    # WAIT UNTIL BOT READY
+    # WAIT UNTIL READY
     # ========================================================
 
     @update_channels.before_loop
-    async def before_update_channels(self):
+    async def before_update_channels(
+        self
+    ):
 
         await self.bot.wait_until_ready()
 
     # ========================================================
-    # UPDATE ONE SERVER
+    # PUBLIC FUNCTION
+    #
+    # Other Cogs can call:
+    #
+    # await stats.update_guild(guild)
+    #
     # ========================================================
 
     async def update_guild(
@@ -194,12 +217,14 @@ class ModeratorStats(
             guild.id
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # TICKETS
-        # ----------------------------------------------------
+        # ====================================================
 
-        ticket_channel_id = guild_data.get(
-            "ticket_channel_id"
+        ticket_channel_id = (
+            guild_data.get(
+                "ticket_channel_id"
+            )
         )
 
         if ticket_channel_id:
@@ -210,38 +235,52 @@ class ModeratorStats(
 
             if ticket_channel:
 
-                ticket_count = await self.get_ticket_count(
-                    guild
+                ticket_count = (
+                    self.get_ticket_count(
+                        guild
+                    )
                 )
 
                 new_name = (
                     f"🎫 Tickets: {ticket_count}"
                 )
 
-                if ticket_channel.name != new_name:
+                if (
+                    ticket_channel.name
+                    != new_name
+                ):
 
                     try:
 
                         await ticket_channel.edit(
                             name=new_name,
                             reason=(
-                                "Updating ticket statistics"
+                                "Updating ticket count"
                             )
                         )
 
                     except discord.Forbidden:
 
                         print(
-                            f"[MOD STATS] Cannot edit "
-                            f"{ticket_channel.name}"
+                            "[MOD STATS] "
+                            "Cannot rename ticket counter"
                         )
 
-        # ----------------------------------------------------
-        # CLAN APPLICATIONS
-        # ----------------------------------------------------
+                    except discord.HTTPException as e:
 
-        clan_channel_id = guild_data.get(
-            "clan_channel_id"
+                        print(
+                            f"[MOD STATS] "
+                            f"Ticket counter error: {e}"
+                        )
+
+        # ====================================================
+        # CLAN APPLICATIONS
+        # ====================================================
+
+        clan_channel_id = (
+            guild_data.get(
+                "clan_channel_id"
+            )
         )
 
         if clan_channel_id:
@@ -252,8 +291,10 @@ class ModeratorStats(
 
             if clan_channel:
 
-                clan_count = await self.get_clan_count(
-                    guild
+                clan_count = (
+                    self.get_clan_count(
+                        guild
+                    )
                 )
 
                 new_name = (
@@ -261,71 +302,79 @@ class ModeratorStats(
                     f"{clan_count}"
                 )
 
-                if clan_channel.name != new_name:
+                if (
+                    clan_channel.name
+                    != new_name
+                ):
 
                     try:
 
                         await clan_channel.edit(
                             name=new_name,
                             reason=(
-                                "Updating clan application statistics"
+                                "Updating clan application count"
                             )
                         )
 
                     except discord.Forbidden:
 
                         print(
-                            f"[MOD STATS] Cannot edit "
-                            f"{clan_channel.name}"
+                            "[MOD STATS] "
+                            "Cannot rename clan counter"
+                        )
+
+                    except discord.HTTPException as e:
+
+                        print(
+                            f"[MOD STATS] "
+                            f"Clan counter error: {e}"
                         )
 
     # ========================================================
-    # COUNT TICKETS
+    # TICKET COUNT
     # ========================================================
 
-    async def get_ticket_count(
+    def get_ticket_count(
         self,
         guild: discord.Guild
-    ):
+    ) -> int:
 
         count = 0
 
         # ----------------------------------------------------
-        # OPTION 1:
-        # Count channels inside a TICKETS category
+        # Look for common ticket categories
         # ----------------------------------------------------
 
-        ticket_category = discord.utils.find(
-            lambda category:
-                category.name.lower()
-                in [
-                    "tickets",
-                    "ticket",
-                    "support tickets"
-                ],
-            guild.categories
-        )
+        possible_names = {
 
-        if ticket_category:
+            "tickets",
+            "ticket",
+            "support tickets",
+            "support",
+            "ticket support"
+        }
 
-            count = len(
-                ticket_category.channels
-            )
+        for category in guild.categories:
+
+            if (
+                category.name.lower().strip()
+                in possible_names
+            ):
+
+                count += len(
+                    category.channels
+                )
 
         return count
 
     # ========================================================
-    # COUNT CLAN APPLICATIONS
+    # CLAN COUNT
     # ========================================================
 
-    async def get_clan_count(
+    def get_clan_count(
         self,
         guild: discord.Guild
-    ):
-
-        # ----------------------------------------------------
-        # Try to use the clan system's stored applications.
-        # ----------------------------------------------------
+    ) -> int:
 
         try:
 
@@ -344,12 +393,58 @@ class ModeratorStats(
                 )
             )
 
-        except Exception:
+        except Exception as e:
+
+            print(
+                f"[MOD STATS] "
+                f"Could not read clan applications: "
+                f"{e}"
+            )
 
             return 0
 
     # ========================================================
-    # CREATE MODERATOR CATEGORY
+    # MANUAL REFRESH
+    # ========================================================
+
+    @app_commands.command(
+        name="refreshmodstats",
+        description=(
+            "Immediately refresh moderator statistics"
+        )
+    )
+    async def refreshmodstats(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        if interaction.guild is None:
+
+            return
+
+        if not is_moderator(
+            interaction.user
+        ):
+
+            await interaction.response.send_message(
+                f"❌ You need the "
+                f"**{MODERATOR_ROLE_NAME}** role.",
+                ephemeral=True
+            )
+
+            return
+
+        await self.update_guild(
+            interaction.guild
+        )
+
+        await interaction.response.send_message(
+            "✅ Moderator statistics refreshed.",
+            ephemeral=True
+        )
+
+    # ========================================================
+    # SETUP MODERATOR STATISTICS
     # ========================================================
 
     @app_commands.command(
@@ -374,10 +469,6 @@ class ModeratorStats(
 
             return
 
-        # ----------------------------------------------------
-        # MODERATOR CHECK
-        # ----------------------------------------------------
-
         if not is_moderator(
             interaction.user
         ):
@@ -390,10 +481,6 @@ class ModeratorStats(
 
             return
 
-        # ----------------------------------------------------
-        # FIND MODERATOR ROLE
-        # ----------------------------------------------------
-
         moderator_role = discord.utils.get(
             guild.roles,
             name=MODERATOR_ROLE_NAME
@@ -403,7 +490,7 @@ class ModeratorStats(
 
             await interaction.response.send_message(
                 f"❌ Role **{MODERATOR_ROLE_NAME}** "
-                f"does not exist.",
+                "does not exist.",
                 ephemeral=True
             )
 
@@ -413,9 +500,9 @@ class ModeratorStats(
             ephemeral=True
         )
 
-        # ----------------------------------------------------
-        # FIND / CREATE CATEGORY
-        # ----------------------------------------------------
+        # ====================================================
+        # CATEGORY
+        # ====================================================
 
         category = discord.utils.get(
             guild.categories,
@@ -439,10 +526,14 @@ class ModeratorStats(
                     )
             }
 
-            category = await guild.create_category(
-                name="MODERATOR STATS",
-                overwrites=overwrites,
-                reason="Moderator statistics system"
+            category = (
+                await guild.create_category(
+                    name="MODERATOR STATS",
+                    overwrites=overwrites,
+                    reason=(
+                        "Moderator statistics system"
+                    )
+                )
             )
 
         else:
@@ -457,24 +548,24 @@ class ModeratorStats(
                 view_channel=True
             )
 
-        # ----------------------------------------------------
-        # TICKET CHANNEL
-        # ----------------------------------------------------
-
-        ticket_channel = None
-
         guild_data = get_guild_data(
             guild.id
         )
 
-        existing_ticket_id = guild_data.get(
+        # ====================================================
+        # TICKET COUNTER
+        # ====================================================
+
+        ticket_channel = None
+
+        ticket_id = guild_data.get(
             "ticket_channel_id"
         )
 
-        if existing_ticket_id:
+        if ticket_id:
 
             ticket_channel = guild.get_channel(
-                existing_ticket_id
+                ticket_id
             )
 
         if ticket_channel is None:
@@ -483,7 +574,9 @@ class ModeratorStats(
                 await guild.create_voice_channel(
                     name="🎫 Tickets: 0",
                     category=category,
-                    reason="Moderator ticket statistics"
+                    reason=(
+                        "Ticket statistics counter"
+                    )
                 )
             )
 
@@ -491,20 +584,20 @@ class ModeratorStats(
                 "ticket_channel_id"
             ] = ticket_channel.id
 
-        # ----------------------------------------------------
-        # CLAN APPLICATION CHANNEL
-        # ----------------------------------------------------
+        # ====================================================
+        # CLAN COUNTER
+        # ====================================================
 
         clan_channel = None
 
-        existing_clan_id = guild_data.get(
+        clan_id = guild_data.get(
             "clan_channel_id"
         )
 
-        if existing_clan_id:
+        if clan_id:
 
             clan_channel = guild.get_channel(
-                existing_clan_id
+                clan_id
             )
 
         if clan_channel is None:
@@ -513,7 +606,9 @@ class ModeratorStats(
                 await guild.create_voice_channel(
                     name="⚔️ Clan Applications: 0",
                     category=category,
-                    reason="Moderator clan application statistics"
+                    reason=(
+                        "Clan application statistics"
+                    )
                 )
             )
 
@@ -521,9 +616,9 @@ class ModeratorStats(
                 "clan_channel_id"
             ] = clan_channel.id
 
-        # ----------------------------------------------------
+        # ====================================================
         # PERMISSIONS
-        # ----------------------------------------------------
+        # ====================================================
 
         for channel in [
             ticket_channel,
@@ -539,33 +634,31 @@ class ModeratorStats(
             await channel.set_permissions(
                 moderator_role,
                 view_channel=True,
-                connect=True,
-                speak=False
+                connect=False
             )
 
-        # ----------------------------------------------------
+        # ====================================================
         # SAVE
-        # ----------------------------------------------------
+        # ====================================================
 
         save_data()
 
-        # ----------------------------------------------------
-        # UPDATE COUNTS
-        # ----------------------------------------------------
+        # ====================================================
+        # INITIAL UPDATE
+        # ====================================================
 
         await self.update_guild(
             guild
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # RESPONSE
-        # ----------------------------------------------------
+        # ====================================================
 
         embed = discord.Embed(
             title="📊 Moderator Statistics",
             description=(
-                "The private moderator statistics "
-                "system has been created."
+                "Moderator statistics have been configured."
             ),
             color=discord.Color.blue()
         )
@@ -584,8 +677,7 @@ class ModeratorStats(
 
         embed.set_footer(
             text=(
-                "Only members with the "
-                f"{MODERATOR_ROLE_NAME} role can see these."
+                "Only moderators can see these channels."
             )
         )
 
