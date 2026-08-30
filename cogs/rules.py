@@ -1,1464 +1,1464 @@
-# ============================================================
-# RULES SYSTEM
-# File: cogs/rules.py
-# ============================================================
+# # ============================================================
+# # RULES SYSTEM
+# # File: cogs/rules.py
+# # ============================================================
 
-import discord
-from discord.ext import commands
-from discord import app_commands
+# import discord
+# from discord.ext import commands
+# from discord import app_commands
 
-import os
-import json
-import asyncio
-from datetime import datetime, timezone
+# import os
+# import json
+# import asyncio
+# from datetime import datetime, timezone
 
 
-# ============================================================
-# SETTINGS
-# ============================================================
+# # ============================================================
+# # SETTINGS
+# # ============================================================
 
-CONFIG_FILE = "rules_config.json"
+# CONFIG_FILE = "rules_config.json"
 
-# Mandatory reaction
-REQUIRED_REACTION = "👍"
+# # Mandatory reaction
+# REQUIRED_REACTION = "👍"
 
-# Seconds between warnings for the same member
-WARNING_COOLDOWN = 30
+# # Seconds between warnings for the same member
+# WARNING_COOLDOWN = 30
 
 
-# ============================================================
-# JSON CONFIGURATION
-# ============================================================
+# # ============================================================
+# # JSON CONFIGURATION
+# # ============================================================
 
-def load_config():
+# def load_config():
 
-    if not os.path.exists(CONFIG_FILE):
-        return {}
+#     if not os.path.exists(CONFIG_FILE):
+#         return {}
 
-    try:
+#     try:
 
-        with open(
-            CONFIG_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
+#         with open(
+#             CONFIG_FILE,
+#             "r",
+#             encoding="utf-8"
+#         ) as file:
 
-            data = json.load(file)
+#             data = json.load(file)
 
-            if isinstance(data, dict):
-                return data
+#             if isinstance(data, dict):
+#                 return data
 
-    except Exception as e:
+#     except Exception as e:
 
-        print(
-            f"❌ Rules config load error: {e}"
-        )
+#         print(
+#             f"❌ Rules config load error: {e}"
+#         )
 
-    return {}
+#     return {}
 
 
-def save_config(data):
+# def save_config(data):
 
-    try:
+#     try:
 
-        temporary_file = CONFIG_FILE + ".tmp"
+#         temporary_file = CONFIG_FILE + ".tmp"
 
-        with open(
-            temporary_file,
-            "w",
-            encoding="utf-8"
-        ) as file:
+#         with open(
+#             temporary_file,
+#             "w",
+#             encoding="utf-8"
+#         ) as file:
 
-            json.dump(
-                data,
-                file,
-                indent=4,
-                ensure_ascii=False
-            )
+#             json.dump(
+#                 data,
+#                 file,
+#                 indent=4,
+#                 ensure_ascii=False
+#             )
 
-        os.replace(
-            temporary_file,
-            CONFIG_FILE
-        )
+#         os.replace(
+#             temporary_file,
+#             CONFIG_FILE
+#         )
 
-        return True
+#         return True
 
-    except Exception as e:
+#     except Exception as e:
 
-        print(
-            f"❌ Rules config save error: {e}"
-        )
+#         print(
+#             f"❌ Rules config save error: {e}"
+#         )
 
-        return False
+#         return False
 
 
-# ============================================================
-# RULES COG
-# ============================================================
+# # ============================================================
+# # RULES COG
+# # ============================================================
 
-class Rules(commands.Cog):
+# class Rules(commands.Cog):
 
-    def __init__(self, bot):
+#     def __init__(self, bot):
 
-        self.bot = bot
+#         self.bot = bot
 
-        # Load existing configuration
-        self.config = load_config()
+#         # Load existing configuration
+#         self.config = load_config()
 
-        # Warning cooldown storage
-        #
-        # {
-        #     guild_id: {
-        #         user_id: timestamp
-        #     }
-        # }
-        #
-        self.warning_cooldowns = {}
+#         # Warning cooldown storage
+#         #
+#         # {
+#         #     guild_id: {
+#         #         user_id: timestamp
+#         #     }
+#         # }
+#         #
+#         self.warning_cooldowns = {}
 
-        print("📜 Rules system loaded.")
+#         print("📜 Rules system loaded.")
 
-    # ========================================================
-    # GET GUILD CONFIG
-    # ========================================================
+#     # ========================================================
+#     # GET GUILD CONFIG
+#     # ========================================================
 
-    def get_guild_config(self, guild_id):
+#     def get_guild_config(self, guild_id):
 
-        return self.config.get(
-            str(guild_id)
-        )
+#         return self.config.get(
+#             str(guild_id)
+#         )
 
-    # ========================================================
-    # SAVE GUILD CONFIG
-    # ========================================================
+#     # ========================================================
+#     # SAVE GUILD CONFIG
+#     # ========================================================
 
-    def save_guild_config(
-        self,
-        guild_id,
-        data
-    ):
+#     def save_guild_config(
+#         self,
+#         guild_id,
+#         data
+#     ):
 
-        self.config[
-            str(guild_id)
-        ] = data
+#         self.config[
+#             str(guild_id)
+#         ] = data
 
-        return save_config(
-            self.config
-        )
+#         return save_config(
+#             self.config
+#         )
 
-    # ========================================================
-    # GET RULES MESSAGE
-    # ========================================================
+#     # ========================================================
+#     # GET RULES MESSAGE
+#     # ========================================================
 
-    async def get_rules_message(
-        self,
-        guild
-    ):
+#     async def get_rules_message(
+#         self,
+#         guild
+#     ):
 
-        config = self.get_guild_config(
-            guild.id
-        )
+#         config = self.get_guild_config(
+#             guild.id
+#         )
 
-        if not config:
-            return None
+#         if not config:
+#             return None
 
-        channel_id = config.get(
-            "channel_id"
-        )
+#         channel_id = config.get(
+#             "channel_id"
+#         )
 
-        message_id = config.get(
-            "message_id"
-        )
+#         message_id = config.get(
+#             "message_id"
+#         )
 
-        if not channel_id or not message_id:
-            return None
+#         if not channel_id or not message_id:
+#             return None
 
-        channel = guild.get_channel(
-            int(channel_id)
-        )
+#         channel = guild.get_channel(
+#             int(channel_id)
+#         )
 
-        if not isinstance(
-            channel,
-            discord.TextChannel
-        ):
-            return None
+#         if not isinstance(
+#             channel,
+#             discord.TextChannel
+#         ):
+#             return None
 
-        try:
+#         try:
 
-            message = await channel.fetch_message(
-                int(message_id)
-            )
+#             message = await channel.fetch_message(
+#                 int(message_id)
+#             )
 
-            return message
+#             return message
 
-        except (
-            discord.NotFound,
-            discord.Forbidden,
-            discord.HTTPException
-        ):
+#         except (
+#             discord.NotFound,
+#             discord.Forbidden,
+#             discord.HTTPException
+#         ):
 
-            return None
+#             return None
 
-    # ========================================================
-    # CHECK IF MEMBER ACCEPTED RULES
-    # ========================================================
+#     # ========================================================
+#     # CHECK IF MEMBER ACCEPTED RULES
+#     # ========================================================
 
-    async def member_accepted_rules(
-        self,
-        guild,
-        member
-    ):
+#     async def member_accepted_rules(
+#         self,
+#         guild,
+#         member
+#     ):
 
-        # Bots are ignored
-        if member.bot:
-            return True
+#         # Bots are ignored
+#         if member.bot:
+#             return True
 
-        rules_message = await self.get_rules_message(
-            guild
-        )
+#         rules_message = await self.get_rules_message(
+#             guild
+#         )
 
-        if rules_message is None:
-            return False
+#         if rules_message is None:
+#             return False
 
-        # ----------------------------------------------------
-        # Find required 👍 reaction
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Find required 👍 reaction
+#         # ----------------------------------------------------
 
-        required_reaction = None
+#         required_reaction = None
 
-        for reaction in rules_message.reactions:
+#         for reaction in rules_message.reactions:
 
-            if str(
-                reaction.emoji
-            ) == REQUIRED_REACTION:
+#             if str(
+#                 reaction.emoji
+#             ) == REQUIRED_REACTION:
 
-                required_reaction = reaction
-                break
+#                 required_reaction = reaction
+#                 break
 
-        # No 👍 reaction exists
-        if required_reaction is None:
-            return False
+#         # No 👍 reaction exists
+#         if required_reaction is None:
+#             return False
 
-        # ----------------------------------------------------
-        # Check actual Discord reaction
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Check actual Discord reaction
+#         # ----------------------------------------------------
 
-        try:
+#         try:
 
-            async for user in required_reaction.users():
+#             async for user in required_reaction.users():
 
-                if user.id == member.id:
-                    return True
+#                 if user.id == member.id:
+#                     return True
 
-        except (
-            discord.Forbidden,
-            discord.HTTPException
-        ):
+#         except (
+#             discord.Forbidden,
+#             discord.HTTPException
+#         ):
 
-            return False
+#             return False
 
-        return False
+#         return False
 
-    # ========================================================
-    # CREATE RULE EMBED
-    # ========================================================
+#     # ========================================================
+#     # CREATE RULE EMBED
+#     # ========================================================
 
-    def create_rules_embed(
-        self,
-        title,
-        rules
-    ):
+#     def create_rules_embed(
+#         self,
+#         title,
+#         rules
+#     ):
 
-        embed = discord.Embed(
+#         embed = discord.Embed(
 
-            title=f"📜 {title}",
+#             title=f"📜 {title}",
 
-            description=rules,
+#             description=rules,
 
-            color=discord.Color.blurple(),
+#             color=discord.Color.blurple(),
 
-            timestamp=datetime.now(
-                timezone.utc
-            )
-        )
+#             timestamp=datetime.now(
+#                 timezone.utc
+#             )
+#         )
 
-        embed.add_field(
+#         embed.add_field(
 
-            name="⚠️ IMPORTANT",
+#             name="⚠️ IMPORTANT",
 
-            value=(
+#             value=(
 
-                f"React with {REQUIRED_REACTION} "
-                "to this message to confirm that "
-                "you have read and accepted the rules."
-            ),
+#                 f"React with {REQUIRED_REACTION} "
+#                 "to this message to confirm that "
+#                 "you have read and accepted the rules."
+#             ),
 
-            inline=False
-        )
+#             inline=False
+#         )
 
-        embed.set_footer(
+#         embed.set_footer(
 
-            text=(
-                "You must accept the rules "
-                "before participating in the server."
-            )
-        )
+#             text=(
+#                 "You must accept the rules "
+#                 "before participating in the server."
+#             )
+#         )
 
-        return embed
+#         return embed
 
-    # ========================================================
-    # RULE CREATION MODAL
-    # ========================================================
+#     # ========================================================
+#     # RULE CREATION MODAL
+#     # ========================================================
 
-    class RuleModal(
-        discord.ui.Modal,
-        title="Create Server Rules"
-    ):
+#     class RuleModal(
+#         discord.ui.Modal,
+#         title="Create Server Rules"
+#     ):
 
-        rule_title = discord.ui.TextInput(
+#         rule_title = discord.ui.TextInput(
 
-            label="Rules Title",
+#             label="Rules Title",
 
-            placeholder="Example: Server Rules",
+#             placeholder="Example: Server Rules",
 
-            required=True,
+#             required=True,
 
-            max_length=100,
+#             max_length=100,
 
-            style=discord.TextStyle.short
-        )
+#             style=discord.TextStyle.short
+#         )
 
-        rule_content = discord.ui.TextInput(
+#         rule_content = discord.ui.TextInput(
 
-            label="Rules",
+#             label="Rules",
 
-            placeholder=(
-                "Enter your server rules here..."
-            ),
+#             placeholder=(
+#                 "Enter your server rules here..."
+#             ),
 
-            required=True,
+#             required=True,
 
-            max_length=4000,
+#             max_length=4000,
 
-            style=discord.TextStyle.paragraph
-        )
+#             style=discord.TextStyle.paragraph
+#         )
 
-        def __init__(
-            self,
-            cog,
-            channel
-        ):
+#         def __init__(
+#             self,
+#             cog,
+#             channel
+#         ):
 
-            super().__init__()
+#             super().__init__()
 
-            self.cog = cog
+#             self.cog = cog
 
-            self.channel = channel
+#             self.channel = channel
 
-        # ====================================================
-        # MODAL SUBMIT
-        # ====================================================
+#         # ====================================================
+#         # MODAL SUBMIT
+#         # ====================================================
 
-        async def on_submit(
-            self,
-            interaction: discord.Interaction
-        ):
+#         async def on_submit(
+#             self,
+#             interaction: discord.Interaction
+#         ):
 
-            channel = self.channel
+#             channel = self.channel
 
-            # ------------------------------------------------
-            # Check channel
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Check channel
+#             # ------------------------------------------------
 
-            if not isinstance(
-                channel,
-                discord.TextChannel
-            ):
+#             if not isinstance(
+#                 channel,
+#                 discord.TextChannel
+#             ):
 
-                await interaction.response.send_message(
+#                 await interaction.response.send_message(
 
-                    "❌ The selected channel is not "
-                    "a normal text channel.",
+#                     "❌ The selected channel is not "
+#                     "a normal text channel.",
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-                return
+#                 return
 
-            # ------------------------------------------------
-            # Check permissions
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Check permissions
+#             # ------------------------------------------------
 
-            bot_member = interaction.guild.me
+#             bot_member = interaction.guild.me
 
-            permissions = channel.permissions_for(
-                bot_member
-            )
+#             permissions = channel.permissions_for(
+#                 bot_member
+#             )
 
-            missing = []
+#             missing = []
 
-            if not permissions.view_channel:
-                missing.append(
-                    "View Channel"
-                )
+#             if not permissions.view_channel:
+#                 missing.append(
+#                     "View Channel"
+#                 )
 
-            if not permissions.send_messages:
-                missing.append(
-                    "Send Messages"
-                )
+#             if not permissions.send_messages:
+#                 missing.append(
+#                     "Send Messages"
+#                 )
 
-            if not permissions.embed_links:
-                missing.append(
-                    "Embed Links"
-                )
+#             if not permissions.embed_links:
+#                 missing.append(
+#                     "Embed Links"
+#                 )
 
-            if not permissions.add_reactions:
-                missing.append(
-                    "Add Reactions"
-                )
+#             if not permissions.add_reactions:
+#                 missing.append(
+#                     "Add Reactions"
+#                 )
 
-            if not permissions.read_message_history:
-                missing.append(
-                    "Read Message History"
-                )
+#             if not permissions.read_message_history:
+#                 missing.append(
+#                     "Read Message History"
+#                 )
 
-            if missing:
+#             if missing:
 
-                await interaction.response.send_message(
+#                 await interaction.response.send_message(
 
-                    "❌ I cannot use that channel.\n\n"
+#                     "❌ I cannot use that channel.\n\n"
 
-                    "**Missing permissions:**\n"
-                    + "\n".join(
-                        f"• {permission}"
-                        for permission in missing
-                    ),
+#                     "**Missing permissions:**\n"
+#                     + "\n".join(
+#                         f"• {permission}"
+#                         for permission in missing
+#                     ),
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-                return
+#                 return
 
-            # ------------------------------------------------
-            # Create rules embed
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Create rules embed
+#             # ------------------------------------------------
 
-            embed = self.cog.create_rules_embed(
+#             embed = self.cog.create_rules_embed(
 
-                str(
-                    self.rule_title.value
-                ),
+#                 str(
+#                     self.rule_title.value
+#                 ),
 
-                str(
-                    self.rule_content.value
-                )
-            )
+#                 str(
+#                     self.rule_content.value
+#                 )
+#             )
 
-            # ------------------------------------------------
-            # Post rules
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Post rules
+#             # ------------------------------------------------
 
-            try:
+#             try:
 
-                rules_message = await channel.send(
-                    embed=embed
-                )
+#                 rules_message = await channel.send(
+#                     embed=embed
+#                 )
 
-            except Exception as e:
+#             except Exception as e:
 
-                await interaction.response.send_message(
+#                 await interaction.response.send_message(
 
-                    "❌ Failed to post the rules.\n\n"
-                    f"`{type(e).__name__}: {e}`",
+#                     "❌ Failed to post the rules.\n\n"
+#                     f"`{type(e).__name__}: {e}`",
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-                return
+#                 return
 
-            # ------------------------------------------------
-            # Add mandatory 👍 reaction
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Add mandatory 👍 reaction
+#             # ------------------------------------------------
 
-            try:
+#             try:
 
-                await rules_message.add_reaction(
-                    REQUIRED_REACTION
-                )
+#                 await rules_message.add_reaction(
+#                     REQUIRED_REACTION
+#                 )
 
-            except Exception as e:
+#             except Exception as e:
 
-                # ------------------------------------------------
-                # Reaction is mandatory.
-                # If bot cannot add it, delete rules message.
-                # ------------------------------------------------
+#                 # ------------------------------------------------
+#                 # Reaction is mandatory.
+#                 # If bot cannot add it, delete rules message.
+#                 # ------------------------------------------------
 
-                try:
+#                 try:
 
-                    await rules_message.delete()
+#                     await rules_message.delete()
 
-                except Exception:
+#                 except Exception:
 
-                    pass
+#                     pass
 
-                await interaction.response.send_message(
+#                 await interaction.response.send_message(
 
-                    "❌ I could not add the mandatory "
-                    f"{REQUIRED_REACTION} reaction.\n\n"
+#                     "❌ I could not add the mandatory "
+#                     f"{REQUIRED_REACTION} reaction.\n\n"
 
-                    "Please make sure I have the "
-                    "**Add Reactions** permission "
-                    "in that channel.",
+#                     "Please make sure I have the "
+#                     "**Add Reactions** permission "
+#                     "in that channel.",
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-                return
+#                 return
 
-            # ------------------------------------------------
-            # Save configuration
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Save configuration
+#             # ------------------------------------------------
 
-            configuration = {
+#             configuration = {
 
-                "channel_id": channel.id,
+#                 "channel_id": channel.id,
 
-                "message_id": rules_message.id,
+#                 "message_id": rules_message.id,
 
-                "title": str(
-                    self.rule_title.value
-                ),
+#                 "title": str(
+#                     self.rule_title.value
+#                 ),
 
-                "rules": str(
-                    self.rule_content.value
-                ),
+#                 "rules": str(
+#                     self.rule_content.value
+#                 ),
 
-                "required_reaction": REQUIRED_REACTION,
+#                 "required_reaction": REQUIRED_REACTION,
 
-                "created_by": interaction.user.id,
+#                 "created_by": interaction.user.id,
 
-                "created_at": datetime.now(
-                    timezone.utc
-                ).isoformat()
-            }
+#                 "created_at": datetime.now(
+#                     timezone.utc
+#                 ).isoformat()
+#             }
 
-            saved = self.cog.save_guild_config(
+#             saved = self.cog.save_guild_config(
 
-                interaction.guild.id,
+#                 interaction.guild.id,
 
-                configuration
-            )
+#                 configuration
+#             )
 
-            # ------------------------------------------------
-            # Configuration save failed
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Configuration save failed
+#             # ------------------------------------------------
 
-            if not saved:
+#             if not saved:
 
-                await interaction.response.send_message(
+#                 await interaction.response.send_message(
 
-                    "⚠️ Rules were posted successfully, "
-                    "but I could not save the configuration.\n\n"
+#                     "⚠️ Rules were posted successfully, "
+#                     "but I could not save the configuration.\n\n"
 
-                    "Please check the bot's file permissions.",
+#                     "Please check the bot's file permissions.",
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-                return
+#                 return
 
-            # ------------------------------------------------
-            # Success
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Success
+#             # ------------------------------------------------
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "✅ **Server rules created successfully!**\n\n"
+#                 "✅ **Server rules created successfully!**\n\n"
 
-                f"📍 Channel: {channel.mention}\n"
+#                 f"📍 Channel: {channel.mention}\n"
 
-                f"📜 Title: **{self.rule_title.value}**\n"
+#                 f"📜 Title: **{self.rule_title.value}**\n"
 
-                f"👍 Required reaction: {REQUIRED_REACTION}\n\n"
+#                 f"👍 Required reaction: {REQUIRED_REACTION}\n\n"
 
-                "Members must react to the rules message "
-                "before participating in the server.",
+#                 "Members must react to the rules message "
+#                 "before participating in the server.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-    # ========================================================
-    # CHANNEL SELECT VIEW
-    # ========================================================
+#     # ========================================================
+#     # CHANNEL SELECT VIEW
+#     # ========================================================
 
-    class RuleChannelView(
-        discord.ui.View
-    ):
+#     class RuleChannelView(
+#         discord.ui.View
+#     ):
 
-        def __init__(
-            self,
-            cog,
-            author
-        ):
+#         def __init__(
+#             self,
+#             cog,
+#             author
+#         ):
 
-            super().__init__(
-                timeout=120
-            )
+#             super().__init__(
+#                 timeout=120
+#             )
 
-            self.cog = cog
+#             self.cog = cog
 
-            self.author = author
+#             self.author = author
 
-            # ------------------------------------------------
-            # IMPORTANT:
-            # Create ChannelSelect here and add it manually.
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # IMPORTANT:
+#             # Create ChannelSelect here and add it manually.
+#             # ------------------------------------------------
 
-            self.channel_select = discord.ui.ChannelSelect(
+#             self.channel_select = discord.ui.ChannelSelect(
 
-                placeholder=(
-                    "📢 Select the rules text channel"
-                ),
+#                 placeholder=(
+#                     "📢 Select the rules text channel"
+#                 ),
 
-                channel_types=[
-                    discord.ChannelType.text
-                ],
+#                 channel_types=[
+#                     discord.ChannelType.text
+#                 ],
 
-                min_values=1,
+#                 min_values=1,
 
-                max_values=1
-            )
+#                 max_values=1
+#             )
 
-            # ------------------------------------------------
-            # Attach callback
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Attach callback
+#             # ------------------------------------------------
 
-            self.channel_select.callback = (
-                self.channel_selected
-            )
+#             self.channel_select.callback = (
+#                 self.channel_selected
+#             )
 
-            # ------------------------------------------------
-            # Add selector to View
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Add selector to View
+#             # ------------------------------------------------
 
-            self.add_item(
-                self.channel_select
-            )
+#             self.add_item(
+#                 self.channel_select
+#             )
 
-        # ====================================================
-        # CHANNEL SELECTED
-        # ====================================================
+#         # ====================================================
+#         # CHANNEL SELECTED
+#         # ====================================================
 
-        async def channel_selected(
-            self,
-            interaction: discord.Interaction
-        ):
+#         async def channel_selected(
+#             self,
+#             interaction: discord.Interaction
+#         ):
 
-            # ------------------------------------------------
-            # Only original admin
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Only original admin
+#             # ------------------------------------------------
 
-            if interaction.user.id != self.author.id:
+#             if interaction.user.id != self.author.id:
 
-                await interaction.response.send_message(
+#                 await interaction.response.send_message(
 
-                    "❌ This setup menu belongs to "
-                    "another administrator.",
+#                     "❌ This setup menu belongs to "
+#                     "another administrator.",
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-                return
+#                 return
 
-            # ------------------------------------------------
-            # Check selection
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Check selection
+#             # ------------------------------------------------
 
-            if not self.channel_select.values:
+#             if not self.channel_select.values:
 
-                await interaction.response.send_message(
+#                 await interaction.response.send_message(
 
-                    "❌ Please select a channel.",
+#                     "❌ Please select a channel.",
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-                return
+#                 return
 
-            channel = self.channel_select.values[0]
+#             channel = self.channel_select.values[0]
 
-            # ------------------------------------------------
-            # Verify text channel
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Verify text channel
+#             # ------------------------------------------------
 
-            if not isinstance(
-                channel,
-                discord.TextChannel
-            ):
+#             if not isinstance(
+#                 channel,
+#                 discord.TextChannel
+#             ):
 
-                await interaction.response.send_message(
+#                 await interaction.response.send_message(
 
-                    "❌ Please select a normal "
-                    "text channel.",
+#                     "❌ Please select a normal "
+#                     "text channel.",
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-                return
+#                 return
 
-            # ------------------------------------------------
-            # Check bot permissions
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Check bot permissions
+#             # ------------------------------------------------
 
-            bot_member = interaction.guild.me
+#             bot_member = interaction.guild.me
 
-            permissions = channel.permissions_for(
-                bot_member
-            )
+#             permissions = channel.permissions_for(
+#                 bot_member
+#             )
 
-            missing = []
+#             missing = []
 
-            if not permissions.view_channel:
-                missing.append(
-                    "View Channel"
-                )
+#             if not permissions.view_channel:
+#                 missing.append(
+#                     "View Channel"
+#                 )
 
-            if not permissions.send_messages:
-                missing.append(
-                    "Send Messages"
-                )
+#             if not permissions.send_messages:
+#                 missing.append(
+#                     "Send Messages"
+#                 )
 
-            if not permissions.embed_links:
-                missing.append(
-                    "Embed Links"
-                )
+#             if not permissions.embed_links:
+#                 missing.append(
+#                     "Embed Links"
+#                 )
 
-            if not permissions.add_reactions:
-                missing.append(
-                    "Add Reactions"
-                )
+#             if not permissions.add_reactions:
+#                 missing.append(
+#                     "Add Reactions"
+#                 )
 
-            if not permissions.read_message_history:
-                missing.append(
-                    "Read Message History"
-                )
+#             if not permissions.read_message_history:
+#                 missing.append(
+#                     "Read Message History"
+#                 )
 
-            if missing:
+#             if missing:
 
-                await interaction.response.send_message(
+#                 await interaction.response.send_message(
 
-                    "❌ I cannot use that channel.\n\n"
+#                     "❌ I cannot use that channel.\n\n"
 
-                    "**Missing permissions:**\n"
-                    + "\n".join(
-                        f"• {permission}"
-                        for permission in missing
-                    ),
+#                     "**Missing permissions:**\n"
+#                     + "\n".join(
+#                         f"• {permission}"
+#                         for permission in missing
+#                     ),
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-                return
+#                 return
 
-            # ------------------------------------------------
-            # Open rules form
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Open rules form
+#             # ------------------------------------------------
 
-            modal = self.cog.RuleModal(
+#             modal = self.cog.RuleModal(
 
-                self.cog,
+#                 self.cog,
 
-                channel
-            )
+#                 channel
+#             )
 
-            await interaction.response.send_modal(
-                modal
-            )
+#             await interaction.response.send_modal(
+#                 modal
+#             )
 
-    # ========================================================
-    # /RULE
-    # ========================================================
+#     # ========================================================
+#     # /RULE
+#     # ========================================================
 
-    @app_commands.command(
+#     @app_commands.command(
 
-        name="rule",
+#         name="rule",
 
-        description=(
-            "Create and post the server rules."
-        )
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def rule(
-        self,
-        interaction: discord.Interaction
-    ):
+#         description=(
+#             "Create and post the server rules."
+#         )
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def rule(
+#         self,
+#         interaction: discord.Interaction
+#     ):
 
-        # ----------------------------------------------------
-        # Server only
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Server only
+#         # ----------------------------------------------------
 
-        if interaction.guild is None:
+#         if interaction.guild is None:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "❌ This command can only be used "
-                "inside a server.",
+#                 "❌ This command can only be used "
+#                 "inside a server.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        # ----------------------------------------------------
-        # Create selector
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Create selector
+#         # ----------------------------------------------------
 
-        view = self.RuleChannelView(
+#         view = self.RuleChannelView(
 
-            self,
+#             self,
 
-            interaction.user
-        )
+#             interaction.user
+#         )
 
-        # ----------------------------------------------------
-        # Send private setup menu
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Send private setup menu
+#         # ----------------------------------------------------
 
-        await interaction.response.send_message(
+#         await interaction.response.send_message(
 
-            "📜 **Server Rules Setup**\n\n"
+#             "📜 **Server Rules Setup**\n\n"
 
-            "Select the **text channel** where you "
-            "want the rules message to be posted.\n\n"
+#             "Select the **text channel** where you "
+#             "want the rules message to be posted.\n\n"
 
-            "After selecting the channel, a form will "
-            "open where you can enter your rules.\n\n"
+#             "After selecting the channel, a form will "
+#             "open where you can enter your rules.\n\n"
 
-            f"Members will be required to react with "
-            f"{REQUIRED_REACTION} to participate.",
+#             f"Members will be required to react with "
+#             f"{REQUIRED_REACTION} to participate.",
 
-            view=view,
+#             view=view,
 
-            ephemeral=True
-        )
+#             ephemeral=True
+#         )
 
-    # ========================================================
-    # /RULEREMOVE
-    # ========================================================
+#     # ========================================================
+#     # /RULEREMOVE
+#     # ========================================================
 
-    @app_commands.command(
+#     @app_commands.command(
 
-        name="ruleremove",
+#         name="ruleremove",
 
-        description=(
-            "Remove the saved rules configuration."
-        )
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def ruleremove(
-        self,
-        interaction: discord.Interaction
-    ):
+#         description=(
+#             "Remove the saved rules configuration."
+#         )
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def ruleremove(
+#         self,
+#         interaction: discord.Interaction
+#     ):
 
-        if interaction.guild is None:
+#         if interaction.guild is None:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "❌ This command can only be used "
-                "inside a server.",
+#                 "❌ This command can only be used "
+#                 "inside a server.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        guild_id = str(
-            interaction.guild.id
-        )
+#         guild_id = str(
+#             interaction.guild.id
+#         )
 
-        if guild_id not in self.config:
+#         if guild_id not in self.config:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "⚪ Rules are not configured.",
+#                 "⚪ Rules are not configured.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        del self.config[
-            guild_id
-        ]
+#         del self.config[
+#             guild_id
+#         ]
 
-        saved = save_config(
-            self.config
-        )
+#         saved = save_config(
+#             self.config
+#         )
 
-        if saved:
+#         if saved:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "✅ Rules configuration removed.\n\n"
+#                 "✅ Rules configuration removed.\n\n"
 
-                "⚠️ The existing rules message was "
-                "not deleted.",
+#                 "⚠️ The existing rules message was "
+#                 "not deleted.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-        else:
+#         else:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "❌ Configuration could not be saved.",
+#                 "❌ Configuration could not be saved.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-    # ========================================================
-    # /RULESTATUS
-    # ========================================================
+#     # ========================================================
+#     # /RULESTATUS
+#     # ========================================================
 
-    @app_commands.command(
+#     @app_commands.command(
 
-        name="rulestatus",
+#         name="rulestatus",
 
-        description=(
-            "Show the current rules configuration."
-        )
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def rulestatus(
-        self,
-        interaction: discord.Interaction
-    ):
+#         description=(
+#             "Show the current rules configuration."
+#         )
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def rulestatus(
+#         self,
+#         interaction: discord.Interaction
+#     ):
 
-        if interaction.guild is None:
+#         if interaction.guild is None:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "❌ This command can only be used "
-                "inside a server.",
+#                 "❌ This command can only be used "
+#                 "inside a server.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        config = self.get_guild_config(
-            interaction.guild.id
-        )
+#         config = self.get_guild_config(
+#             interaction.guild.id
+#         )
 
-        if not config:
+#         if not config:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "⚪ Rules are not configured "
-                "for this server.",
+#                 "⚪ Rules are not configured "
+#                 "for this server.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        channel = interaction.guild.get_channel(
+#         channel = interaction.guild.get_channel(
 
-            int(
-                config.get(
-                    "channel_id",
-                    0
-                )
-            )
-        )
+#             int(
+#                 config.get(
+#                     "channel_id",
+#                     0
+#                 )
+#             )
+#         )
 
-        rules_message = await self.get_rules_message(
+#         rules_message = await self.get_rules_message(
 
-            interaction.guild
-        )
+#             interaction.guild
+#         )
 
-        # ----------------------------------------------------
-        # Create status embed
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Create status embed
+#         # ----------------------------------------------------
 
-        embed = discord.Embed(
+#         embed = discord.Embed(
 
-            title="📜 Rules Status",
+#             title="📜 Rules Status",
 
-            color=discord.Color.blurple(),
+#             color=discord.Color.blurple(),
 
-            timestamp=datetime.now(
-                timezone.utc
-            )
-        )
+#             timestamp=datetime.now(
+#                 timezone.utc
+#             )
+#         )
 
-        # Status
-        if rules_message:
+#         # Status
+#         if rules_message:
 
-            embed.add_field(
+#             embed.add_field(
 
-                name="Status",
+#                 name="Status",
 
-                value="🟢 Active",
+#                 value="🟢 Active",
 
-                inline=False
-            )
+#                 inline=False
+#             )
 
-        else:
+#         else:
 
-            embed.add_field(
+#             embed.add_field(
 
-                name="Status",
+#                 name="Status",
 
-                value=(
-                    "🔴 Rules message not found"
-                ),
+#                 value=(
+#                     "🔴 Rules message not found"
+#                 ),
 
-                inline=False
-            )
+#                 inline=False
+#             )
 
-        # Channel
-        embed.add_field(
+#         # Channel
+#         embed.add_field(
 
-            name="Rules Channel",
+#             name="Rules Channel",
 
-            value=(
-                channel.mention
-                if channel
-                else "❌ Channel not found"
-            ),
+#             value=(
+#                 channel.mention
+#                 if channel
+#                 else "❌ Channel not found"
+#             ),
 
-            inline=True
-        )
+#             inline=True
+#         )
 
-        # Reaction
-        embed.add_field(
+#         # Reaction
+#         embed.add_field(
 
-            name="Required Reaction",
+#             name="Required Reaction",
 
-            value=REQUIRED_REACTION,
+#             value=REQUIRED_REACTION,
 
-            inline=True
-        )
+#             inline=True
+#         )
 
-        # Message
-        if rules_message:
+#         # Message
+#         if rules_message:
 
-            embed.add_field(
+#             embed.add_field(
 
-                name="Rules Message",
+#                 name="Rules Message",
 
-                value=(
-                    f"[Jump to Rules Message]"
-                    f"({rules_message.jump_url})"
-                ),
+#                 value=(
+#                     f"[Jump to Rules Message]"
+#                     f"({rules_message.jump_url})"
+#                 ),
 
-                inline=False
-            )
+#                 inline=False
+#             )
 
-        else:
+#         else:
 
-            embed.add_field(
+#             embed.add_field(
 
-                name="Rules Message",
+#                 name="Rules Message",
 
-                value="❌ Message not found",
+#                 value="❌ Message not found",
 
-                inline=False
-            )
+#                 inline=False
+#             )
 
-        # ----------------------------------------------------
-        # Send
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Send
+#         # ----------------------------------------------------
 
-        await interaction.response.send_message(
+#         await interaction.response.send_message(
 
-            embed=embed,
+#             embed=embed,
 
-            ephemeral=True
-        )
+#             ephemeral=True
+#         )
 
-    # ========================================================
-    # MESSAGE LISTENER
-    # ========================================================
+#     # ========================================================
+#     # MESSAGE LISTENER
+#     # ========================================================
 
-    @commands.Cog.listener()
-    async def on_message(
-        self,
-        message: discord.Message
-    ):
+#     @commands.Cog.listener()
+#     async def on_message(
+#         self,
+#         message: discord.Message
+#     ):
 
-        # ----------------------------------------------------
-        # Ignore DMs
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Ignore DMs
+#         # ----------------------------------------------------
 
-        if message.guild is None:
-            return
+#         if message.guild is None:
+#             return
 
-        # ----------------------------------------------------
-        # Ignore bots
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Ignore bots
+#         # ----------------------------------------------------
 
-        if message.author.bot:
-            return
+#         if message.author.bot:
+#             return
 
-        # ----------------------------------------------------
-        # Ignore administrators
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Ignore administrators
+#         # ----------------------------------------------------
 
-        if (
-            message.author.guild_permissions.administrator
-        ):
-            return
+#         if (
+#             message.author.guild_permissions.administrator
+#         ):
+#             return
 
-        # ----------------------------------------------------
-        # Get configuration
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Get configuration
+#         # ----------------------------------------------------
 
-        config = self.get_guild_config(
+#         config = self.get_guild_config(
 
-            message.guild.id
-        )
+#             message.guild.id
+#         )
 
-        if not config:
-            return
+#         if not config:
+#             return
 
-        # ----------------------------------------------------
-        # Get rules message
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Get rules message
+#         # ----------------------------------------------------
 
-        rules_message = await self.get_rules_message(
+#         rules_message = await self.get_rules_message(
 
-            message.guild
-        )
+#             message.guild
+#         )
 
-        if rules_message is None:
-            return
+#         if rules_message is None:
+#             return
 
-        # ----------------------------------------------------
-        # Don't warn inside rules channel
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Don't warn inside rules channel
+#         # ----------------------------------------------------
 
-        if (
-            message.channel.id
-            == rules_message.channel.id
-        ):
+#         if (
+#             message.channel.id
+#             == rules_message.channel.id
+#         ):
 
-            return
+#             return
 
-        # ----------------------------------------------------
-        # Check actual 👍 reaction
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Check actual 👍 reaction
+#         # ----------------------------------------------------
 
-        accepted = await self.member_accepted_rules(
+#         accepted = await self.member_accepted_rules(
 
-            message.guild,
+#             message.guild,
 
-            message.author
-        )
+#             message.author
+#         )
 
-        if accepted:
-            return
+#         if accepted:
+#             return
 
-        # ----------------------------------------------------
-        # Warning cooldown
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Warning cooldown
+#         # ----------------------------------------------------
 
-        guild_id = message.guild.id
+#         guild_id = message.guild.id
 
-        user_id = message.author.id
+#         user_id = message.author.id
 
-        current_time = (
-            asyncio.get_running_loop().time()
-        )
+#         current_time = (
+#             asyncio.get_running_loop().time()
+#         )
 
-        guild_cooldowns = (
-            self.warning_cooldowns.setdefault(
-                guild_id,
-                {}
-            )
-        )
+#         guild_cooldowns = (
+#             self.warning_cooldowns.setdefault(
+#                 guild_id,
+#                 {}
+#             )
+#         )
 
-        last_warning = guild_cooldowns.get(
-            user_id,
-            0
-        )
+#         last_warning = guild_cooldowns.get(
+#             user_id,
+#             0
+#         )
 
-        if (
-            current_time - last_warning
-            < WARNING_COOLDOWN
-        ):
+#         if (
+#             current_time - last_warning
+#             < WARNING_COOLDOWN
+#         ):
 
-            return
+#             return
 
-        guild_cooldowns[
-            user_id
-        ] = current_time
+#         guild_cooldowns[
+#             user_id
+#         ] = current_time
 
-        # ----------------------------------------------------
-        # Send warning
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Send warning
+#         # ----------------------------------------------------
 
-        try:
+#         try:
 
-            await message.channel.send(
+#             await message.channel.send(
 
-                f"⚠️ {message.author.mention} "
-                "you must read and accept the server "
-                "rules before participating.\n\n"
+#                 f"⚠️ {message.author.mention} "
+#                 "you must read and accept the server "
+#                 "rules before participating.\n\n"
 
-                f"Please react with {REQUIRED_REACTION} "
-                "to the rules message in "
-                f"{rules_message.channel.mention}.\n\n"
+#                 f"Please react with {REQUIRED_REACTION} "
+#                 "to the rules message in "
+#                 f"{rules_message.channel.mention}.\n\n"
 
-                f"[📜 Go to Rules]"
-                f"({rules_message.jump_url})",
+#                 f"[📜 Go to Rules]"
+#                 f"({rules_message.jump_url})",
 
-                delete_after=10
-            )
+#                 delete_after=10
+#             )
 
-        except (
-            discord.Forbidden,
-            discord.HTTPException
-        ):
+#         except (
+#             discord.Forbidden,
+#             discord.HTTPException
+#         ):
 
-            pass
+#             pass
 
-    # ========================================================
-    # REACTION ADDED
-    # ========================================================
+#     # ========================================================
+#     # REACTION ADDED
+#     # ========================================================
 
-    @commands.Cog.listener()
-    async def on_raw_reaction_add(
-        self,
-        payload: discord.RawReactionActionEvent
-    ):
+#     @commands.Cog.listener()
+#     async def on_raw_reaction_add(
+#         self,
+#         payload: discord.RawReactionActionEvent
+#     ):
 
-        # ----------------------------------------------------
-        # Ignore DMs
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Ignore DMs
+#         # ----------------------------------------------------
 
-        if payload.guild_id is None:
-            return
+#         if payload.guild_id is None:
+#             return
 
-        # ----------------------------------------------------
-        # Ignore bot reactions
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Ignore bot reactions
+#         # ----------------------------------------------------
 
-        if payload.user_id == self.bot.user.id:
-            return
+#         if payload.user_id == self.bot.user.id:
+#             return
 
-        # ----------------------------------------------------
-        # Get config
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Get config
+#         # ----------------------------------------------------
 
-        config = self.get_guild_config(
+#         config = self.get_guild_config(
 
-            payload.guild_id
-        )
+#             payload.guild_id
+#         )
 
-        if not config:
-            return
+#         if not config:
+#             return
 
-        # ----------------------------------------------------
-        # Check rules message
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Check rules message
+#         # ----------------------------------------------------
 
-        rules_message_id = config.get(
-            "message_id"
-        )
+#         rules_message_id = config.get(
+#             "message_id"
+#         )
 
-        if not rules_message_id:
-            return
+#         if not rules_message_id:
+#             return
 
-        if payload.message_id != int(
-            rules_message_id
-        ):
+#         if payload.message_id != int(
+#             rules_message_id
+#         ):
 
-            return
+#             return
 
-        # ----------------------------------------------------
-        # Only 👍 is accepted
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Only 👍 is accepted
+#         # ----------------------------------------------------
 
-        if str(
-            payload.emoji
-        ) != REQUIRED_REACTION:
+#         if str(
+#             payload.emoji
+#         ) != REQUIRED_REACTION:
 
-            return
+#             return
 
-        # ----------------------------------------------------
-        # Clear warning cooldown
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Clear warning cooldown
+#         # ----------------------------------------------------
 
-        guild_cooldowns = (
-            self.warning_cooldowns.get(
-                payload.guild_id,
-                {}
-            )
-        )
+#         guild_cooldowns = (
+#             self.warning_cooldowns.get(
+#                 payload.guild_id,
+#                 {}
+#             )
+#         )
 
-        guild_cooldowns.pop(
-            payload.user_id,
-            None
-        )
+#         guild_cooldowns.pop(
+#             payload.user_id,
+#             None
+#         )
 
-        # ----------------------------------------------------
-        # Log
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Log
+#         # ----------------------------------------------------
 
-        guild = self.bot.get_guild(
-            payload.guild_id
-        )
+#         guild = self.bot.get_guild(
+#             payload.guild_id
+#         )
 
-        if guild:
+#         if guild:
 
-            member = guild.get_member(
-                payload.user_id
-            )
+#             member = guild.get_member(
+#                 payload.user_id
+#             )
 
-            if member:
+#             if member:
 
-                print(
+#                 print(
 
-                    f"📜 {member} accepted "
-                    f"the rules in {guild.name}."
-                )
+#                     f"📜 {member} accepted "
+#                     f"the rules in {guild.name}."
+#                 )
 
-    # ========================================================
-    # REACTION REMOVED
-    # ========================================================
+#     # ========================================================
+#     # REACTION REMOVED
+#     # ========================================================
 
-    @commands.Cog.listener()
-    async def on_raw_reaction_remove(
-        self,
-        payload: discord.RawReactionActionEvent
-    ):
+#     @commands.Cog.listener()
+#     async def on_raw_reaction_remove(
+#         self,
+#         payload: discord.RawReactionActionEvent
+#     ):
 
-        # ----------------------------------------------------
-        # Ignore DMs
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Ignore DMs
+#         # ----------------------------------------------------
 
-        if payload.guild_id is None:
-            return
+#         if payload.guild_id is None:
+#             return
 
-        # ----------------------------------------------------
-        # Get config
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Get config
+#         # ----------------------------------------------------
 
-        config = self.get_guild_config(
+#         config = self.get_guild_config(
 
-            payload.guild_id
-        )
+#             payload.guild_id
+#         )
 
-        if not config:
-            return
+#         if not config:
+#             return
 
-        rules_message_id = config.get(
-            "message_id"
-        )
+#         rules_message_id = config.get(
+#             "message_id"
+#         )
 
-        if not rules_message_id:
-            return
+#         if not rules_message_id:
+#             return
 
-        # ----------------------------------------------------
-        # Check rules message
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Check rules message
+#         # ----------------------------------------------------
 
-        if payload.message_id != int(
-            rules_message_id
-        ):
+#         if payload.message_id != int(
+#             rules_message_id
+#         ):
 
-            return
+#             return
 
-        # ----------------------------------------------------
-        # Only 👍 matters
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Only 👍 matters
+#         # ----------------------------------------------------
 
-        if str(
-            payload.emoji
-        ) != REQUIRED_REACTION:
+#         if str(
+#             payload.emoji
+#         ) != REQUIRED_REACTION:
 
-            return
+#             return
 
-        print(
+#         print(
 
-            f"⚠️ User {payload.user_id} "
-            "removed their rules reaction."
-        )
+#             f"⚠️ User {payload.user_id} "
+#             "removed their rules reaction."
+#         )
 
-    # ========================================================
-    # RULE COMMAND ERROR
-    # ========================================================
+#     # ========================================================
+#     # RULE COMMAND ERROR
+#     # ========================================================
 
-    @rule.error
-    async def rule_error(
-        self,
-        interaction,
-        error
-    ):
+#     @rule.error
+#     async def rule_error(
+#         self,
+#         interaction,
+#         error
+#     ):
 
-        if isinstance(
-            error,
-            app_commands.errors.MissingPermissions
-        ):
+#         if isinstance(
+#             error,
+#             app_commands.errors.MissingPermissions
+#         ):
 
-            message = (
-                "❌ You need **Administrator** "
-                "permission to use `/rule`."
-            )
+#             message = (
+#                 "❌ You need **Administrator** "
+#                 "permission to use `/rule`."
+#             )
 
-        else:
+#         else:
 
-            print(
-                f"❌ /rule error: {error}"
-            )
+#             print(
+#                 f"❌ /rule error: {error}"
+#             )
 
-            message = (
-                "❌ An error occurred while "
-                "opening the rules setup."
-            )
+#             message = (
+#                 "❌ An error occurred while "
+#                 "opening the rules setup."
+#             )
 
-        try:
+#         try:
 
-            if interaction.response.is_done():
+#             if interaction.response.is_done():
 
-                await interaction.followup.send(
+#                 await interaction.followup.send(
 
-                    message,
+#                     message,
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-            else:
+#             else:
 
-                await interaction.response.send_message(
+#                 await interaction.response.send_message(
 
-                    message,
+#                     message,
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-        except Exception:
+#         except Exception:
 
-            pass
+#             pass
 
 
-# ============================================================
-# SETUP
-# ============================================================
+# # ============================================================
+# # SETUP
+# # ============================================================
 
-async def setup(bot):
+# async def setup(bot):
 
-    await bot.add_cog(
-        Rules(bot)
-    )
+#     await bot.add_cog(
+#         Rules(bot)
+#     )
 
-    print(
-        "✅ Rules Cog loaded successfully."
-    )
+#     print(
+#         "✅ Rules Cog loaded successfully."
+#     )
