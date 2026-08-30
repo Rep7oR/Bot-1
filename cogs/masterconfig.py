@@ -35,6 +35,7 @@ class MasterConfig(commands.Cog):
                 min_size=1,
                 max_size=5,
                 command_timeout=30
+                ssl="require"
             )
 
             print("✅ Supabase PostgreSQL connected")
