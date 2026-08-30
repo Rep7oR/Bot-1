@@ -2,20 +2,37 @@
 # MASTER CONFIGURATION SYSTEM
 # ============================================================
 #
-# PURPOSE:
+# PURPOSE
 #
-# 1. Master Config loads FIRST.
-# 2. Restores all saved JSON configuration files.
-# 3. Other Cogs are loaded AFTER restoration.
-# 4. Configuration is stored on Render Persistent Disk.
-# 5. Existing JSON files are automatically discovered.
-# 6. New JSON files can be detected automatically.
-# 7. /refresh shows all Cogs, configurations and commands.
-# 8. Configuration is backed up every 15 seconds.
+# 1. MasterConfig loads FIRST.
+# 2. Persistent configuration is restored BEFORE other Cogs.
+# 3. Existing JSON files are automatically discovered.
+# 4. JSON files stored only in persistent storage are restored.
+# 5. Persistent configuration takes priority over local JSON.
+# 6. Configurations are backed up automatically.
+# 7. /refresh shows all loaded Cogs.
+# 8. /refresh shows saved configuration.
+# 9. /refresh shows detected commands.
+# 10. Empty local files cannot overwrite useful persistent data.
+#
+# Render:
+#
+# BOT_PERSIST_DIR=/data
+#
+# Persistent structure:
+#
+# /data/
+#     master_config.json
+#     configs/
+#         welcome_config.json
+#         youtube_config.json
+#         clan_data.json
+#         ...
 #
 # ============================================================
 
 import discord
+
 from discord.ext import commands, tasks
 from discord import app_commands
 
@@ -23,21 +40,12 @@ import os
 import json
 import asyncio
 import traceback
+
 from datetime import datetime, timezone
 
 
 # ============================================================
 # SETTINGS
-# ============================================================
-
-# Render:
-#
-# BOT_PERSIST_DIR=/data
-#
-# Local:
-#
-# BOT_PERSIST_DIR=data
-#
 # ============================================================
 
 PERSISTENT_DIR = os.getenv(
@@ -57,45 +65,93 @@ MASTER_FILE = os.path.join(
 )
 
 
+PERSISTENT_CONFIG_DIR = os.path.join(
+    PERSISTENT_DIR,
+    "configs"
+)
+
+os.makedirs(
+    PERSISTENT_CONFIG_DIR,
+    exist_ok=True
+)
+
+
 # ============================================================
-# CONFIGURATION FILES
-# ============================================================
-#
-# These are known configuration files.
-#
-# The system will ALSO automatically discover other
-# JSON configuration files in the project root.
-#
+# KNOWN CONFIGURATION FILES
 # ============================================================
 
 CONFIG_FILES = {
 
-    "Auto_Reply": "ai_chat_config.json",
+    "Auto_Reply":
+        "ai_chat_config.json",
 
-    "Clan": "clan_data.json",
+    "AIChat":
+        "ai_chat_config.json",
 
-    "cmd": "cmd_config.json",
+    "Clan":
+        "clan_data.json",
 
-    "help_system": "help_config.json",
+    "ClanSystem":
+        "clan_data.json",
 
-    "moderator_online": "moderator_online.json",
+    "cmd":
+        "cmd_config.json",
 
-    "moderator_stats": "moderator_stats.json",
+    "CommandSystem":
+        "cmd_config.json",
 
-    "music_system": "music_config.json",
+    "help_system":
+        "help_config.json",
 
-    "voice": "voice_config.json",
+    "HelpSystem":
+        "help_config.json",
 
-    "welcome": "welcome_config.json",
+    "moderator_online":
+        "moderator_online.json",
 
-    "youtube": "youtube_config.json",
+    "ModeratorOnline":
+        "moderator_online.json",
 
-    "rules": "rules_config.json",
+    "moderator_stats":
+        "moderator_stats.json",
+
+    "ModeratorStats":
+        "moderator_stats.json",
+
+    "music_system":
+        "music_config.json",
+
+    "MusicSystem":
+        "music_config.json",
+
+    "voice":
+        "voice_config.json",
+
+    "VoiceSystem":
+        "voice_config.json",
+
+    "welcome":
+        "welcome_config.json",
+
+    "Welcome":
+        "welcome_config.json",
+
+    "youtube":
+        "youtube_config.json",
+
+    "YouTubeSystem":
+        "youtube_config.json",
+
+    "rules":
+        "rules_config.json",
+
+    "Rules":
+        "rules_config.json",
 }
 
 
 # ============================================================
-# COGS WITHOUT JSON CONFIGURATION
+# COGS THAT DO NOT NEED CONFIGURATION
 # ============================================================
 
 NO_CONFIG_COGS = {
@@ -135,7 +191,6 @@ def utc_now():
 def read_json(path):
 
     if not os.path.exists(path):
-
         return None
 
     try:
@@ -161,10 +216,7 @@ def read_json(path):
 # JSON WRITE
 # ============================================================
 
-def write_json(
-    path,
-    data
-):
+def write_json(path, data):
 
     try:
 
@@ -177,9 +229,7 @@ def write_json(
                 exist_ok=True
             )
 
-        temporary = (
-            path + ".tmp"
-        )
+        temporary = path + ".tmp"
 
         with open(
             temporary,
@@ -218,11 +268,13 @@ def empty_master():
 
     return {
 
-        "version": 2,
+        "version": 3,
 
-        "created_at": utc_now(),
+        "created_at":
+            utc_now(),
 
-        "last_backup": None,
+        "last_backup":
+            None,
 
         "files": {}
 
@@ -250,7 +302,7 @@ def load_master():
 
     data.setdefault(
         "version",
-        2
+        3
     )
 
     data.setdefault(
@@ -282,12 +334,10 @@ master_data = load_master()
 
 
 # ============================================================
-# FILE PATH
+# LOCAL CONFIG PATH
 # ============================================================
 
-def config_path(
-    filename
-):
+def config_path(filename):
 
     return os.path.join(
         os.getcwd(),
@@ -296,25 +346,22 @@ def config_path(
 
 
 # ============================================================
-# PERSISTENT BACKUP PATH
+# PERSISTENT CONFIG PATH
 # ============================================================
 
-def persistent_config_path(
-    filename
-):
+def persistent_config_path(filename):
 
     return os.path.join(
-        PERSISTENT_DIR,
-        "configs",
+        PERSISTENT_CONFIG_DIR,
         filename
     )
 
 
 # ============================================================
-# AUTOMATIC JSON DISCOVERY
+# DISCOVER LOCAL JSON FILES
 # ============================================================
 
-def discover_json_files():
+def discover_local_json_files():
 
     discovered = {}
 
@@ -327,47 +374,78 @@ def discover_json_files():
             if not filename.endswith(
                 ".json"
             ):
-
                 continue
 
             if filename.startswith(
                 "."
             ):
-
                 continue
 
             if filename in {
                 "package.json",
                 "package-lock.json",
+                "master_config.json"
             }:
-
-                continue
-
-            # Never treat master_config itself
-            # as a Cog configuration file.
-
-            if filename == "master_config.json":
-
                 continue
 
             path = config_path(
                 filename
             )
 
-            if not os.path.isfile(
-                path
-            ):
+            if os.path.isfile(path):
 
-                continue
-
-            discovered[
-                filename
-            ] = filename
+                discovered[
+                    filename
+                ] = filename
 
     except Exception as e:
 
         print(
-            f"⚠️ JSON discovery error: {e}"
+            f"⚠️ Local JSON discovery error: {e}"
+        )
+
+    return discovered
+
+
+# ============================================================
+# DISCOVER PERSISTENT JSON FILES
+# ============================================================
+
+def discover_persistent_json_files():
+
+    discovered = {}
+
+    try:
+
+        if not os.path.exists(
+            PERSISTENT_CONFIG_DIR
+        ):
+
+            return discovered
+
+        for filename in os.listdir(
+            PERSISTENT_CONFIG_DIR
+        ):
+
+            if not filename.endswith(
+                ".json"
+            ):
+                continue
+
+            path = persistent_config_path(
+                filename
+            )
+
+            if os.path.isfile(path):
+
+                discovered[
+                    filename
+                ] = filename
+
+    except Exception as e:
+
+        print(
+            f"⚠️ Persistent JSON discovery error: {e}"
         )
 
     return discovered
@@ -382,30 +460,22 @@ def get_all_config_files():
     result = {}
 
     # --------------------------------------------------------
-    # Known files
+    # Known configuration files
     # --------------------------------------------------------
 
-    for cog_name, filename in (
-        CONFIG_FILES.items()
-    ):
+    for cog_name, filename in CONFIG_FILES.items():
 
-        result[
-            filename
-        ] = cog_name
+        result[filename] = cog_name
 
     # --------------------------------------------------------
-    # Automatically discovered files
+    # Local JSON files
     # --------------------------------------------------------
 
-    discovered = discover_json_files()
-
-    for filename in discovered:
+    for filename in discover_local_json_files():
 
         if filename not in result:
 
-            result[
-                filename
-            ] = (
+            result[filename] = (
                 filename
                 .replace(
                     ".json",
@@ -419,49 +489,103 @@ def get_all_config_files():
             )
 
     # --------------------------------------------------------
-    # Files already stored in master backup
+    # Persistent JSON files
     #
-    # This is VERY important.
+    # IMPORTANT:
     #
-    # Even if the current deployment doesn't contain the
-    # original JSON file yet, the master backup still knows
-    # about it.
+    # Even if the JSON file disappeared from the deployment,
+    # persistent storage still tells us it exists.
     # --------------------------------------------------------
 
-    for filename in master_data.get(
-        "files",
-        {}
-    ):
+    for filename in discover_persistent_json_files():
 
         if filename not in result:
 
-            backup = master_data[
-                "files"
-            ].get(
-                filename,
-                {}
+            result[filename] = (
+                filename
+                .replace(
+                    ".json",
+                    ""
+                )
+                .replace(
+                    "_",
+                    " "
+                )
+                .title()
             )
 
-            result[
-                filename
-            ] = backup.get(
-                "cog",
-                filename
-            )
+    # --------------------------------------------------------
+    # Master index
+    # --------------------------------------------------------
+
+    for filename, info in master_data.get(
+        "files",
+        {}
+    ).items():
+
+        if filename not in result:
+
+            if isinstance(
+                info,
+                dict
+            ):
+
+                result[filename] = info.get(
+                    "cog",
+                    filename
+                )
+
+            else:
+
+                result[filename] = filename
 
     return result
 
 
 # ============================================================
-# MIGRATE OLD LOCAL CONFIG
+# IS USEFUL CONFIGURATION?
+# ============================================================
+
+def has_useful_data(data):
+
+    if data is None:
+        return False
+
+    if isinstance(
+        data,
+        dict
+    ):
+
+        return bool(data)
+
+    if isinstance(
+        data,
+        list
+    ):
+
+        return bool(data)
+
+    if isinstance(
+        data,
+        str
+    ):
+
+        return bool(data.strip())
+
+    return True
+
+
+# ============================================================
+# MIGRATE OLD CONFIGURATION
 # ============================================================
 #
-# If a JSON configuration already exists locally and there
-# is no persistent backup yet, save it to persistent storage.
+# Used when:
 #
-# This prevents existing setups from being lost when moving
-# to the new system.
+# - A local config exists
+# - Persistent config does NOT exist
 #
+# This is important when installing this system for the first
+# time with an already-configured bot.
 # ============================================================
 
 def migrate_existing_configs():
@@ -472,71 +596,81 @@ def migrate_existing_configs():
 
     all_files = get_all_config_files()
 
-    for filename, cog_name in (
-        all_files.items()
-    ):
+    for filename, cog_name in all_files.items():
 
         local_path = config_path(
             filename
         )
 
-        persistent_path = (
-            persistent_config_path(
-                filename
-            )
+        persistent_path = persistent_config_path(
+            filename
         )
 
         # ----------------------------------------------------
-        # Existing local file
+        # If persistent configuration already exists,
+        # NEVER replace it with local repository data.
         # ----------------------------------------------------
 
         if os.path.exists(
+            persistent_path
+        ):
+
+            continue
+
+        # ----------------------------------------------------
+        # Local configuration exists
+        # ----------------------------------------------------
+
+        if not os.path.exists(
             local_path
         ):
 
-            data = read_json(
-                local_path
+            continue
+
+        data = read_json(
+            local_path
+        )
+
+        if data is None:
+
+            continue
+
+        # ----------------------------------------------------
+        # Save first persistent copy
+        # ----------------------------------------------------
+
+        if write_json(
+            persistent_path,
+            data
+        ):
+
+            print(
+                f"📦 Migrated {filename} "
+                f"to persistent storage."
             )
 
-            if data is not None:
+            changed = True
 
-                # Only create persistent copy if one
-                # doesn't already exist.
+        # ----------------------------------------------------
+        # Save master index
+        # ----------------------------------------------------
 
-                if not os.path.exists(
-                    persistent_path
-                ):
+        master_data[
+            "files"
+        ][filename] = {
 
-                    if write_json(
-                        persistent_path,
-                        data
-                    ):
+            "cog":
+                cog_name,
 
-                        print(
-                            f"📦 Migrated "
-                            f"{filename} "
-                            f"to persistent storage."
-                        )
+            "updated_at":
+                utc_now(),
 
-                        changed = True
+            "data":
+                data
 
-                # Master index
-                if filename not in master_data[
-                    "files"
-                ]:
+        }
 
-                    master_data[
-                        "files"
-                    ][filename] = {
-
-                        "cog": cog_name,
-
-                        "updated_at": utc_now(),
-
-                        "data": data
-                    }
-
-                    changed = True
+        changed = True
 
     if changed:
 
@@ -551,6 +685,168 @@ def migrate_existing_configs():
 
 
 # ============================================================
+# RESTORE ONE CONFIGURATION
+# ============================================================
+
+def restore_one_config(
+    filename,
+    cog_name
+):
+
+    global master_data
+
+    local_path = config_path(
+        filename
+    )
+
+    persistent_path = persistent_config_path(
+        filename
+    )
+
+    # --------------------------------------------------------
+    # PRIORITY 1
+    #
+    # Persistent configuration
+    # --------------------------------------------------------
+
+    if os.path.exists(
+        persistent_path
+    ):
+
+        persistent_data = read_json(
+            persistent_path
+        )
+
+        if persistent_data is not None:
+
+            # ALWAYS restore persistent data.
+            #
+            # This is the critical fix.
+            #
+            # We intentionally overwrite the local JSON.
+            #
+
+            if write_json(
+                local_path,
+                persistent_data
+            ):
+
+                master_data[
+                    "files"
+                ][filename] = {
+
+                    "cog":
+                        cog_name,
+
+                    "updated_at":
+                        utc_now(),
+
+                    "data":
+                        persistent_data
+
+                }
+
+                print(
+                    f"♻️ Restored {filename} "
+                    f"from persistent storage."
+                )
+
+                return True
+
+    # --------------------------------------------------------
+    # PRIORITY 2
+    #
+    # Master backup
+    # --------------------------------------------------------
+
+    backup = master_data.get(
+        "files",
+        {}
+    ).get(
+        filename
+    )
+
+    if isinstance(
+        backup,
+        dict
+    ):
+
+        backup_data = backup.get(
+            "data"
+        )
+
+        if backup_data is not None:
+
+            if write_json(
+                local_path,
+                backup_data
+            ):
+
+                # Also recreate persistent copy
+
+                write_json(
+                    persistent_path,
+                    backup_data
+                )
+
+                print(
+                    f"♻️ Restored {filename} "
+                    f"from master backup."
+                )
+
+                return True
+
+    # --------------------------------------------------------
+    # PRIORITY 3
+    #
+    # Existing local configuration
+    #
+    # Only used if no persistent configuration exists.
+    # --------------------------------------------------------
+
+    if os.path.exists(
+        local_path
+    ):
+
+        local_data = read_json(
+            local_path
+        )
+
+        if local_data is not None:
+
+            # Create persistent copy
+
+            write_json(
+                persistent_path,
+                local_data
+            )
+
+            master_data[
+                "files"
+            ][filename] = {
+
+                "cog":
+                    cog_name,
+
+                "updated_at":
+                    utc_now(),
+
+                "data":
+                    local_data
+
+            }
+
+            print(
+                f"📦 Saved existing "
+                f"{filename}."
+            )
+
+            return False
+
+    return False
+
+
+# ============================================================
 # RESTORE ALL CONFIGURATIONS
 # ============================================================
 
@@ -562,108 +858,65 @@ def restore_all_configs():
 
     all_files = get_all_config_files()
 
-    # --------------------------------------------------------
-    # First restore from persistent config copies
-    # --------------------------------------------------------
+    print(
+        "------------------------------------------"
+    )
 
-    for filename, cog_name in (
-        all_files.items()
-    ):
+    print(
+        f"🔎 Checking {len(all_files)} configuration files..."
+    )
 
-        target = config_path(
-            filename
-        )
+    print(
+        "------------------------------------------"
+    )
 
-        persistent_path = (
-            persistent_config_path(
-                filename
-            )
-        )
+    for filename, cog_name in all_files.items():
 
-        # ----------------------------------------------------
-        # Current file already exists
-        # ----------------------------------------------------
+        try:
 
-        if os.path.exists(
-            target
-        ):
-
-            continue
-
-        # ----------------------------------------------------
-        # Persistent copy
-        # ----------------------------------------------------
-
-        if os.path.exists(
-            persistent_path
-        ):
-
-            data = read_json(
-                persistent_path
+            restored_now = restore_one_config(
+                filename,
+                cog_name
             )
 
-            if data is not None:
+            if restored_now:
 
-                if write_json(
-                    target,
-                    data
-                ):
+                restored.append(
+                    filename
+                )
 
-                    restored.append(
-                        filename
-                    )
-
-                    print(
-                        f"♻️ Restored "
-                        f"{filename} "
-                        f"from persistent storage."
-                    )
-
-                continue
-
-        # ----------------------------------------------------
-        # Master backup
-        # ----------------------------------------------------
-
-        backup = master_data.get(
-            "files",
-            {}
-        ).get(
-            filename
-        )
-
-        if not backup:
-
-            continue
-
-        data = backup.get(
-            "data"
-        )
-
-        if data is None:
-
-            continue
-
-        if write_json(
-            target,
-            data
-        ):
-
-            restored.append(
-                filename
-            )
+        except Exception as e:
 
             print(
-                f"♻️ Restored "
-                f"{filename} "
-                f"from master backup."
+                f"❌ Failed restoring "
+                f"{filename}: {e}"
             )
+
+    # Save updated master index
+
+    master_data[
+        "last_backup"
+    ] = utc_now()
+
+    write_json(
+        MASTER_FILE,
+        master_data
+    )
 
     return restored
 
 
 # ============================================================
 # BACKUP ALL CONFIGURATIONS
+# ============================================================
+#
+# IMPORTANT:
+#
+# An empty local JSON file must NOT overwrite a useful
+# persistent configuration.
+#
+# This prevents a Cog with an empty/default configuration
+# from destroying saved configuration after restart.
 # ============================================================
 
 def backup_all_configs():
@@ -674,18 +927,14 @@ def backup_all_configs():
 
     all_files = get_all_config_files()
 
-    for filename, cog_name in (
-        all_files.items()
-    ):
+    for filename, cog_name in all_files.items():
 
         local_path = config_path(
             filename
         )
 
-        persistent_path = (
-            persistent_config_path(
-                filename
-            )
+        persistent_path = persistent_config_path(
+            filename
         )
 
         # ----------------------------------------------------
@@ -696,110 +945,147 @@ def backup_all_configs():
             local_path
         ):
 
-            data = read_json(
+            local_data = read_json(
                 local_path
             )
 
-            if data is not None:
+            if local_data is None:
 
-                # --------------------------------------------
-                # Save persistent copy
-                # --------------------------------------------
+                continue
 
-                if write_json(
-                    persistent_path,
-                    data
-                ):
+            persistent_data = read_json(
+                persistent_path
+            )
 
-                    pass
+            # ------------------------------------------------
+            # SAFETY:
+            #
+            # If local is empty but persistent has real data,
+            # keep the persistent configuration.
+            # ------------------------------------------------
 
-                # --------------------------------------------
-                # Save master index
-                # --------------------------------------------
+            if (
+                not has_useful_data(local_data)
+                and
+                has_useful_data(persistent_data)
+            ):
 
-                previous = master_data[
-                    "files"
-                ].get(
-                    filename
+                print(
+                    f"🛡️ Protected "
+                    f"{filename} "
+                    f"from empty overwrite."
                 )
+
+                continue
+
+            # ------------------------------------------------
+            # Save persistent copy
+            # ------------------------------------------------
+
+            if write_json(
+                persistent_path,
+                local_data
+            ):
+
+                pass
+
+            # ------------------------------------------------
+            # Master index
+            # ------------------------------------------------
+
+            previous = master_data[
+                "files"
+            ].get(
+                filename
+            )
+
+            new_entry = {
+
+                "cog":
+                    cog_name,
+
+                "updated_at":
+                    utc_now(),
+
+                "data":
+                    local_data
+
+            }
+
+            master_data[
+                "files"
+            ][filename] = new_entry
+
+            if previous is None:
+
+                changed = True
+
+            elif previous.get(
+                "data"
+            ) != local_data:
+
+                changed = True
+
+        # ----------------------------------------------------
+        # Local file does not exist
+        #
+        # DO NOT delete persistent configuration.
+        # ----------------------------------------------------
+
+        else:
+
+            persistent_data = read_json(
+                persistent_path
+            )
+
+            if persistent_data is not None:
 
                 master_data[
                     "files"
                 ][filename] = {
 
-                    "cog": cog_name,
+                    "cog":
+                        cog_name,
 
-                    "updated_at": utc_now(),
+                    "updated_at":
+                        utc_now(),
 
-                    "data": data
+                    "data":
+                        persistent_data
+
                 }
 
-                # Only mark changed if actual config
-                # changed.
-
-                if previous is None:
-
-                    changed = True
-
-                elif previous.get(
-                    "data"
-                ) != data:
-
-                    changed = True
-
-        # ----------------------------------------------------
-        # Local file missing
-        #
-        # DO NOT delete its backup.
-        #
-        # This is extremely important.
-        # ----------------------------------------------------
-
-        else:
-
-            if filename in master_data.get(
-                "files",
-                {}
-            ):
-
-                continue
+                changed = True
 
     # --------------------------------------------------------
-    # Update timestamp
+    # Save master index
     # --------------------------------------------------------
 
     master_data[
         "last_backup"
     ] = utc_now()
 
-    # --------------------------------------------------------
-    # Always save master file.
-    #
-    # This makes sure newly discovered JSON files are
-    # registered even when the actual data didn't change.
-    # --------------------------------------------------------
-
     success = write_json(
         MASTER_FILE,
         master_data
     )
 
-    if success:
+    if success and changed:
 
-        if changed:
-
-            print(
-                "💾 Master configuration backup updated."
-            )
+        print(
+            "💾 Master configuration backup updated."
+        )
 
     return success
 
 
 # ============================================================
-# STARTUP RESTORE
+# PREPARE CONFIGURATION
 # ============================================================
 
 def prepare_configuration():
+
+    global master_data
 
     print(
         "=========================================="
@@ -819,12 +1105,26 @@ def prepare_configuration():
     )
 
     print(
+        f"📁 Config directory: "
+        f"{PERSISTENT_CONFIG_DIR}"
+    )
+
+    print(
         f"📄 Master file: "
         f"{MASTER_FILE}"
     )
 
     # --------------------------------------------------------
-    # Migrate existing configuration first
+    # Load master
+    # --------------------------------------------------------
+
+    master_data = load_master()
+
+    # --------------------------------------------------------
+    # FIRST:
+    #
+    # Migrate old configurations only when no persistent
+    # version exists.
     # --------------------------------------------------------
 
     try:
@@ -838,15 +1138,17 @@ def prepare_configuration():
         )
 
     # --------------------------------------------------------
-    # Reload master after migration
+    # Reload master
     # --------------------------------------------------------
-
-    global master_data
 
     master_data = load_master()
 
     # --------------------------------------------------------
-    # Restore
+    # SECOND:
+    #
+    # Restore persistent configurations.
+    #
+    # Persistent configuration ALWAYS wins.
     # --------------------------------------------------------
 
     try:
@@ -868,8 +1170,7 @@ def prepare_configuration():
         else:
 
             print(
-                "ℹ️ No configuration files "
-                "needed restoration."
+                "ℹ️ No files required restoration."
             )
 
     except Exception as e:
@@ -891,30 +1192,53 @@ def configuration_status(
     filename
 ):
 
-    path = config_path(
+    local_path = config_path(
         filename
     )
 
+    persistent_path = persistent_config_path(
+        filename
+    )
+
+    # --------------------------------------------------------
+    # Persistent configuration gets priority
+    # --------------------------------------------------------
+
+    persistent_data = read_json(
+        persistent_path
+    )
+
+    if has_useful_data(
+        persistent_data
+    ):
+
+        return (
+            "♻️",
+            "Saved configuration restored."
+        )
+
+    # --------------------------------------------------------
+    # Local configuration
+    # --------------------------------------------------------
+
     if os.path.exists(
-        path
+        local_path
     ):
 
         data = read_json(
-            path
+            local_path
         )
 
         if data is None:
 
             return (
                 "❌",
-                "Configuration file exists "
-                "but could not be read."
+                "Configuration file cannot be read."
             )
 
-        if isinstance(
-            data,
-            dict
-        ) and not data:
+        if not has_useful_data(
+            data
+        ):
 
             return (
                 "⚪",
@@ -923,41 +1247,33 @@ def configuration_status(
 
         return (
             "✅",
-            "Configuration saved."
-        )
-
-    # --------------------------------------------------------
-    # Persistent backup
-    # --------------------------------------------------------
-
-    persistent = (
-        persistent_config_path(
-            filename
-        )
-    )
-
-    if os.path.exists(
-        persistent
-    ):
-
-        return (
-            "♻️",
-            "Persistent backup available."
+            "Configuration file found."
         )
 
     # --------------------------------------------------------
     # Master backup
     # --------------------------------------------------------
 
-    if filename in master_data.get(
+    backup = master_data.get(
         "files",
         {}
+    ).get(
+        filename
+    )
+
+    if isinstance(
+        backup,
+        dict
     ):
 
-        return (
-            "♻️",
-            "Master backup available."
-        )
+        if has_useful_data(
+            backup.get("data")
+        ):
+
+            return (
+                "♻️",
+                "Master backup available."
+            )
 
     return (
         "⚪",
@@ -966,7 +1282,7 @@ def configuration_status(
 
 
 # ============================================================
-# GUILD CONFIG EXTRACTION
+# EXTRACT GUILD CONFIGURATION
 # ============================================================
 
 def extract_guild_config(
@@ -986,10 +1302,10 @@ def extract_guild_config(
     )
 
     # --------------------------------------------------------
-    # Normal:
+    # Format:
     #
     # {
-    #   "123456": {...}
+    #     "123456": {...}
     # }
     # --------------------------------------------------------
 
@@ -1000,12 +1316,12 @@ def extract_guild_config(
         ]
 
     # --------------------------------------------------------
-    # Nested guilds:
+    # Format:
     #
     # {
-    #   "guilds": {
-    #       "123456": {...}
-    #   }
+    #     "guilds": {
+    #         "123456": {...}
+    #     }
     # }
     # --------------------------------------------------------
 
@@ -1028,7 +1344,7 @@ def extract_guild_config(
 
 
 # ============================================================
-# CHANNEL RESOLVER
+# DISCORD RESOLVERS
 # ============================================================
 
 def resolve_channel(
@@ -1037,7 +1353,6 @@ def resolve_channel(
 ):
 
     if channel_id is None:
-
         return None
 
     try:
@@ -1051,17 +1366,12 @@ def resolve_channel(
         return None
 
 
-# ============================================================
-# ROLE RESOLVER
-# ============================================================
-
 def resolve_role(
     guild,
     role_id
 ):
 
     if role_id is None:
-
         return None
 
     try:
@@ -1075,17 +1385,12 @@ def resolve_role(
         return None
 
 
-# ============================================================
-# CATEGORY RESOLVER
-# ============================================================
-
 def resolve_category(
     guild,
     category_id
 ):
 
     if category_id is None:
-
         return None
 
     try:
@@ -1109,7 +1414,7 @@ def resolve_category(
 
 
 # ============================================================
-# FORMAT VALUE
+# FORMAT CONFIGURATION VALUES
 # ============================================================
 
 def format_value(
@@ -1139,7 +1444,7 @@ def format_value(
         )
 
     # --------------------------------------------------------
-    # Channel
+    # Channel ID
     # --------------------------------------------------------
 
     if (
@@ -1162,7 +1467,7 @@ def format_value(
         )
 
     # --------------------------------------------------------
-    # Category
+    # Category ID
     # --------------------------------------------------------
 
     if (
@@ -1187,7 +1492,7 @@ def format_value(
         )
 
     # --------------------------------------------------------
-    # Role
+    # Role ID
     # --------------------------------------------------------
 
     if (
@@ -1210,21 +1515,15 @@ def format_value(
         )
 
     # --------------------------------------------------------
-    # User/member
+    # User/member/owner
     # --------------------------------------------------------
 
     if (
-        key_lower.endswith(
-            "user_id"
-        )
+        key_lower.endswith("user_id")
         or
-        key_lower.endswith(
-            "member_id"
-        )
+        key_lower.endswith("member_id")
         or
-        key_lower.endswith(
-            "owner_id"
-        )
+        key_lower.endswith("owner_id")
     ):
 
         try:
@@ -1330,7 +1629,10 @@ def flatten_config(
             dict
         ):
 
+            # Don't dump huge member/cache dictionaries
+
             if key in {
+
                 "pending",
                 "clans",
                 "tickets",
@@ -1340,6 +1642,8 @@ def flatten_config(
                 "stats",
                 "users",
                 "cache",
+                "history"
+
             }:
 
                 lines.append(
@@ -1364,7 +1668,7 @@ def flatten_config(
             else:
 
                 lines.append(
-                    f"**{key_text}:** `{...}`"
+                    f"**{key_text}:** `{{}}`"
                 )
 
             continue
@@ -1392,7 +1696,7 @@ def flatten_config(
             continue
 
         # ----------------------------------------------------
-        # Normal
+        # Normal values
         # ----------------------------------------------------
 
         formatted = format_value(
@@ -1533,20 +1837,20 @@ class MasterConfig(
         )
 
         print(
-            f"📄 Master file: "
-            f"{MASTER_FILE}"
+            f"📁 Config directory: "
+            f"{PERSISTENT_CONFIG_DIR}"
         )
 
         # ----------------------------------------------------
-        # CRITICAL
+        # CRITICAL:
         #
-        # Restore BEFORE the other Cogs are loaded.
+        # Restore before other Cogs load.
         # ----------------------------------------------------
 
         prepare_configuration()
 
         # ----------------------------------------------------
-        # Start backup
+        # Start backup loop
         # ----------------------------------------------------
 
         self.backup_loop.start()
@@ -1628,7 +1932,7 @@ class MasterConfig(
         )
 
         # ----------------------------------------------------
-        # Find configuration filename
+        # Find configuration file
         # ----------------------------------------------------
 
         filename = CONFIG_FILES.get(
@@ -1636,7 +1940,7 @@ class MasterConfig(
         )
 
         # ----------------------------------------------------
-        # Aliases
+        # Additional aliases
         # ----------------------------------------------------
 
         if filename is None:
@@ -1686,7 +1990,7 @@ class MasterConfig(
             )
 
         # ----------------------------------------------------
-        # No configuration
+        # No configuration Cog
         # ----------------------------------------------------
 
         if filename is None:
@@ -1695,74 +1999,88 @@ class MasterConfig(
 
                 return {
 
-                    "status": "ℹ️",
+                    "status":
+                        "ℹ️",
 
-                    "message": (
-                        "Command-only Cog. "
-                        "No persistent setup required."
-                    ),
+                    "message":
+                        (
+                            "Command-only Cog. "
+                            "No persistent setup required."
+                        ),
 
-                    "config": None,
+                    "config":
+                        None,
 
-                    "commands": commands_found,
+                    "commands":
+                        commands_found,
 
-                    "filename": None
+                    "filename":
+                        None
 
                 }
 
             return {
 
-                "status": "ℹ️",
+                "status":
+                    "ℹ️",
 
-                "message": (
-                    "No configuration file "
-                    "registered for this Cog."
-                ),
+                "message":
+                    (
+                        "No configuration file "
+                        "registered for this Cog."
+                    ),
 
-                "config": None,
+                "config":
+                    None,
 
-                "commands": commands_found,
+                "commands":
+                    commands_found,
 
-                "filename": None
+                "filename":
+                    None
 
             }
 
         # ----------------------------------------------------
-        # Current file
+        # IMPORTANT:
+        #
+        # Read persistent copy FIRST.
         # ----------------------------------------------------
 
-        path = config_path(
+        persistent_path = persistent_config_path(
             filename
         )
 
-        data = read_json(
-            path
+        persistent_data = read_json(
+            persistent_path
         )
 
-        # ----------------------------------------------------
-        # Current file missing
-        # ----------------------------------------------------
+        if persistent_data is not None:
 
-        if data is None:
+            data = persistent_data
 
-            persistent_path = (
-                persistent_config_path(
-                    filename
-                )
+            status = "♻️"
+
+            message = (
+                "Persistent configuration loaded."
             )
 
-            persistent_data = read_json(
-                persistent_path
+        else:
+
+            path = config_path(
+                filename
             )
 
-            if persistent_data is not None:
+            data = read_json(
+                path
+            )
 
-                data = persistent_data
+            if data is not None:
 
-                status = "♻️"
+                status = "✅"
 
                 message = (
-                    "Persistent backup available."
+                    "Configuration file found."
                 )
 
             else:
@@ -1774,7 +2092,10 @@ class MasterConfig(
                     filename
                 )
 
-                if backup:
+                if isinstance(
+                    backup,
+                    dict
+                ):
 
                     data = backup.get(
                         "data"
@@ -1796,16 +2117,8 @@ class MasterConfig(
                         "Not configured."
                     )
 
-        else:
-
-            status = "✅"
-
-            message = (
-                "Configuration file found."
-            )
-
         # ----------------------------------------------------
-        # Extract guild
+        # Extract server-specific configuration
         # ----------------------------------------------------
 
         guild_config = (
@@ -1818,6 +2131,7 @@ class MasterConfig(
             if data is not None
 
             else None
+
         )
 
         # ----------------------------------------------------
@@ -1826,22 +2140,22 @@ class MasterConfig(
 
         if guild_config is not None:
 
-            if isinstance(
-                guild_config,
-                dict
+            if (
+                isinstance(
+                    guild_config,
+                    dict
+                )
+                and
+                not guild_config
             ):
 
-                if not guild_config:
+                status = "⚪"
 
-                    status = "⚪"
+                message = (
+                    "Guild configuration is empty."
+                )
 
-                    message = (
-                        "Guild configuration is empty."
-                    )
-
-            config_to_show = (
-                guild_config
-            )
+            config_to_show = guild_config
 
         else:
 
@@ -1858,15 +2172,20 @@ class MasterConfig(
 
         return {
 
-            "status": status,
+            "status":
+                status,
 
-            "message": message,
+            "message":
+                message,
 
-            "config": config_to_show,
+            "config":
+                config_to_show,
 
-            "commands": commands_found,
+            "commands":
+                commands_found,
 
-            "filename": filename
+            "filename":
+                filename
 
         }
 
@@ -1881,9 +2200,11 @@ class MasterConfig(
 
         reports = []
 
-        for cog_name, cog in (
-            self.bot.cogs.items()
-        ):
+        # ----------------------------------------------------
+        # Running Cogs
+        # ----------------------------------------------------
+
+        for cog_name, cog in self.bot.cogs.items():
 
             if isinstance(
                 cog,
@@ -1916,18 +2237,24 @@ class MasterConfig(
                         cog_name,
                         {
 
-                            "status": "❌",
+                            "status":
+                                "❌",
 
-                            "message": (
-                                f"{type(e).__name__}: "
-                                f"{e}"
-                            ),
+                            "message":
+                                (
+                                    f"{type(e).__name__}: "
+                                    f"{e}"
+                                ),
 
-                            "config": None,
+                            "config":
+                                None,
 
-                            "commands": [],
+                            "commands":
+                                [],
 
-                            "filename": None
+                            "filename":
+                                None
+
                         }
                     )
                 )
@@ -1955,10 +2282,8 @@ class MasterConfig(
         if interaction.guild is None:
 
             await interaction.response.send_message(
-
                 "❌ This command can only be used "
                 "inside a server.",
-
                 ephemeral=True
             )
 
@@ -1971,7 +2296,11 @@ class MasterConfig(
         guild = interaction.guild
 
         # ----------------------------------------------------
-        # Backup first
+        # IMPORTANT:
+        #
+        # Do NOT run setup commands.
+        #
+        # Only save/check existing configuration.
         # ----------------------------------------------------
 
         try:
@@ -1985,7 +2314,7 @@ class MasterConfig(
             )
 
         # ----------------------------------------------------
-        # Reports
+        # Build reports
         # ----------------------------------------------------
 
         reports = self.build_reports(
@@ -2014,7 +2343,10 @@ class MasterConfig(
                 "status"
             )
 
-            if status == "✅":
+            if status in {
+                "✅",
+                "♻️"
+            }:
 
                 configured += 1
 
@@ -2042,7 +2374,7 @@ class MasterConfig(
             )
 
         # ----------------------------------------------------
-        # Embeds
+        # Build embeds
         # ----------------------------------------------------
 
         embeds = []
@@ -2057,9 +2389,11 @@ class MasterConfig(
 
                 "All loaded Cogs were checked "
                 "against their saved configuration."
+
             ),
 
             color=discord.Color.blurple()
+
         )
 
         field_count = 0
@@ -2090,7 +2424,7 @@ class MasterConfig(
             )
 
             # ------------------------------------------------
-            # Setup
+            # Setup information
             # ------------------------------------------------
 
             if config is not None:
@@ -2152,6 +2486,7 @@ class MasterConfig(
 
                     for command
                     in commands_found
+
                 )
 
                 if len(
@@ -2186,6 +2521,7 @@ class MasterConfig(
                 f"🛠️ **Commands:**\n"
 
                 f"{command_text}"
+
             )
 
             # ------------------------------------------------
@@ -2210,12 +2546,13 @@ class MasterConfig(
                 value=value,
 
                 inline=False
+
             )
 
             field_count += 1
 
             # ------------------------------------------------
-            # Discord max 25 fields
+            # Discord embed field limit
             # ------------------------------------------------
 
             if field_count >= 20:
@@ -2232,6 +2569,7 @@ class MasterConfig(
                     ),
 
                     color=discord.Color.blurple()
+
                 )
 
                 field_count = 0
@@ -2282,6 +2620,7 @@ class MasterConfig(
 
                 f"📁 **Storage:** "
                 f"`{PERSISTENT_DIR}`"
+
             ),
 
             color=(
@@ -2291,7 +2630,9 @@ class MasterConfig(
                 if errors == 0
 
                 else discord.Color.red()
+
             )
+
         )
 
         summary.set_footer(
@@ -2300,10 +2641,11 @@ class MasterConfig(
                 f"Requested by "
                 f"{interaction.user}"
             )
+
         )
 
         # ----------------------------------------------------
-        # Send
+        # Send embeds
         # ----------------------------------------------------
 
         for embed in embeds:
@@ -2313,6 +2655,7 @@ class MasterConfig(
                 embed=embed,
 
                 ephemeral=True
+
             )
 
         await interaction.followup.send(
@@ -2320,6 +2663,7 @@ class MasterConfig(
             embed=summary,
 
             ephemeral=True
+
         )
 
     # ========================================================
@@ -2361,6 +2705,7 @@ class MasterConfig(
                     message,
 
                     ephemeral=True
+
                 )
 
             else:
@@ -2370,6 +2715,7 @@ class MasterConfig(
                     message,
 
                     ephemeral=True
+
                 )
 
         except Exception:
@@ -2381,9 +2727,7 @@ class MasterConfig(
 # SETUP
 # ============================================================
 
-async def setup(
-    bot
-):
+async def setup(bot):
 
     await bot.add_cog(
         MasterConfig(bot)
