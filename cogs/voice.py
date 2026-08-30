@@ -24,6 +24,13 @@ MODERATOR_ROLE_NAMES = [
 # =========================================================
 
 def load_config():
+    """
+    Load the voice configuration safely.
+
+    The bot expects the JSON root to be a dictionary.
+    If the file is missing, invalid, or contains another
+    JSON type, return an empty dictionary instead.
+    """
 
     if not os.path.exists(CONFIG_FILE):
         return {}
@@ -34,23 +41,58 @@ def load_config():
             "r",
             encoding="utf-8"
         ) as f:
-            return json.load(f)
 
-    except (json.JSONDecodeError, FileNotFoundError):
+            data = json.load(f)
+
+        # The configuration must always be a dictionary.
+        if not isinstance(data, dict):
+            print(
+                "⚠️ voice_config.json does not contain "
+                "a valid dictionary. Resetting configuration."
+            )
+            return {}
+
+        return data
+
+    except (
+        json.JSONDecodeError,
+        FileNotFoundError,
+        TypeError,
+        OSError
+    ) as e:
+
+        print(
+            f"⚠️ Could not load {CONFIG_FILE}: {e}"
+        )
+
         return {}
 
 
 def save_config(config):
+    """
+    Save the configuration safely.
+    """
 
-    with open(
-        CONFIG_FILE,
-        "w",
-        encoding="utf-8"
-    ) as f:
-        json.dump(
-            config,
-            f,
-            indent=4
+    if not isinstance(config, dict):
+        config = {}
+
+    try:
+        with open(
+            CONFIG_FILE,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            json.dump(
+                config,
+                f,
+                indent=4
+            )
+
+    except OSError as e:
+
+        print(
+            f"❌ Could not save {CONFIG_FILE}: {e}"
         )
 
 
@@ -63,7 +105,15 @@ class VoiceSystem(commands.Cog):
     def __init__(self, bot):
 
         self.bot = bot
-        self.config = load_config()
+
+        loaded_config = load_config()
+
+        # Make absolutely sure self.config is a dictionary.
+        self.config = (
+            loaded_config
+            if isinstance(loaded_config, dict)
+            else {}
+        )
 
         # =================================================
         # TEMPORARY CHANNEL DATA
@@ -151,6 +201,7 @@ class VoiceSystem(commands.Cog):
         )
 
         if guild.icon:
+
             embed.set_thumbnail(
                 url=guild.icon.url
             )
@@ -183,11 +234,24 @@ class VoiceSystem(commands.Cog):
 
         guild = member.guild
 
+        # -------------------------------------------------
+        # SAFETY CHECK
+        # -------------------------------------------------
+
+        if not isinstance(self.config, dict):
+            self.config = {}
+
+            return
+
         guild_config = self.config.get(
             str(guild.id)
         )
 
-        if not guild_config:
+        # IMPORTANT:
+        # Prevent "'str' object has no attribute 'get'"
+        # or similar errors if one guild's configuration
+        # is malformed.
+        if not isinstance(guild_config, dict):
             return
 
         join_channel_id = guild_config.get(
@@ -211,7 +275,7 @@ class VoiceSystem(commands.Cog):
                 category_id
             )
 
-            if category:
+            if isinstance(category, discord.CategoryChannel):
 
                 await self.create_room(
                     member,
@@ -236,7 +300,10 @@ class VoiceSystem(commands.Cog):
                 room["text_channel_id"]
             )
 
-            if text_channel:
+            if isinstance(
+                text_channel,
+                discord.TextChannel
+            ):
 
                 await self.add_text_access(
                     text_channel,
@@ -277,7 +344,10 @@ class VoiceSystem(commands.Cog):
             # Otherwise remove member's text access
             # -------------------------------------------------
 
-            if text_channel:
+            if isinstance(
+                text_channel,
+                discord.TextChannel
+            ):
 
                 # Do NOT remove moderator access.
                 if not is_moderator(member):
@@ -288,6 +358,9 @@ class VoiceSystem(commands.Cog):
                             member,
                             overwrite=None
                         )
+
+                    except discord.Forbidden:
+                        pass
 
                     except discord.HTTPException:
                         pass
@@ -459,10 +532,12 @@ class VoiceSystem(commands.Cog):
         except discord.Forbidden:
 
             try:
+
                 await voice_channel.delete(
                     reason="Could not create text channel"
                 )
-            except:
+
+            except Exception:
                 pass
 
             print(
@@ -472,14 +547,21 @@ class VoiceSystem(commands.Cog):
 
             return
 
-        except discord.HTTPException:
+        except discord.HTTPException as e:
 
             try:
+
                 await voice_channel.delete(
                     reason="Could not create text channel"
                 )
-            except:
+
+            except Exception:
                 pass
+
+            print(
+                f"❌ Cannot create text channel "
+                f"for {member}: {e}"
+            )
 
             return
 
@@ -507,6 +589,9 @@ class VoiceSystem(commands.Cog):
             await member.move_to(
                 voice_channel
             )
+
+        except discord.Forbidden:
+            pass
 
         except discord.HTTPException:
             pass
@@ -711,6 +796,13 @@ class VoiceSystem(commands.Cog):
                 ephemeral=True
             )
 
+        except discord.HTTPException:
+
+            await interaction.response.send_message(
+                "❌ Discord could not rename this room.",
+                ephemeral=True
+            )
+
     # =====================================================
     # LIMIT
     # =====================================================
@@ -755,6 +847,13 @@ class VoiceSystem(commands.Cog):
 
             await interaction.response.send_message(
                 "❌ I cannot change the user limit.",
+                ephemeral=True
+            )
+
+        except discord.HTTPException:
+
+            await interaction.response.send_message(
+                "❌ Discord could not change the user limit.",
                 ephemeral=True
             )
 
@@ -878,6 +977,13 @@ class VoiceSystem(commands.Cog):
                 ephemeral=True
             )
 
+        except discord.HTTPException:
+
+            await interaction.response.send_message(
+                "❌ Discord could not change the room permissions.",
+                ephemeral=True
+            )
+
     # =====================================================
     # DELETE ROOM
     # =====================================================
@@ -988,7 +1094,7 @@ class VoiceSystem(commands.Cog):
             str(guild.id)
         )
 
-        if not config:
+        if not isinstance(config, dict):
 
             await interaction.response.send_message(
                 "❌ Voice system is not configured.",
@@ -1008,7 +1114,7 @@ class VoiceSystem(commands.Cog):
         active_rooms = [
             room
             for room in self.temp_channels.values()
-            if room["guild_id"] == guild.id
+            if room.get("guild_id") == guild.id
         ]
 
         await interaction.response.send_message(
@@ -1043,10 +1149,12 @@ class VoiceSystem(commands.Cog):
             app_commands.errors.MissingPermissions
         ):
 
-            await interaction.response.send_message(
-                "❌ You need **Administrator** permission.",
-                ephemeral=True
-            )
+            if not interaction.response.is_done():
+
+                await interaction.response.send_message(
+                    "❌ You need **Administrator** permission.",
+                    ephemeral=True
+                )
 
 
 # =========================================================
@@ -1087,6 +1195,15 @@ class VoiceControlView(
         button
     ):
 
+        if interaction.guild is None:
+
+            await interaction.response.send_message(
+                "❌ This button can only be used in a server.",
+                ephemeral=True
+            )
+
+            return
+
         channel = interaction.guild.get_channel(
             self.channel_id
         )
@@ -1121,6 +1238,15 @@ class VoiceControlView(
         interaction,
         button
     ):
+
+        if interaction.guild is None:
+
+            await interaction.response.send_message(
+                "❌ This button can only be used in a server.",
+                ephemeral=True
+            )
+
+            return
 
         channel = interaction.guild.get_channel(
             self.channel_id
@@ -1157,6 +1283,15 @@ class VoiceControlView(
         button
     ):
 
+        if interaction.guild is None:
+
+            await interaction.response.send_message(
+                "❌ This button can only be used in a server.",
+                ephemeral=True
+            )
+
+            return
+
         channel = interaction.guild.get_channel(
             self.channel_id
         )
@@ -1190,6 +1325,15 @@ class VoiceControlView(
         button
     ):
 
+        if interaction.guild is None:
+
+            await interaction.response.send_message(
+                "❌ This button can only be used in a server.",
+                ephemeral=True
+            )
+
+            return
+
         channel = interaction.guild.get_channel(
             self.channel_id
         )
@@ -1222,6 +1366,15 @@ class VoiceControlView(
         interaction,
         button
     ):
+
+        if interaction.guild is None:
+
+            await interaction.response.send_message(
+                "❌ This button can only be used in a server.",
+                ephemeral=True
+            )
+
+            return
 
         channel = interaction.guild.get_channel(
             self.channel_id
@@ -1296,12 +1449,23 @@ class RenameModal(
         interaction
     ):
 
+        new_name = str(
+            self.name_input.value
+        ).strip()
+
+        if not new_name:
+
+            await interaction.response.send_message(
+                "❌ The room name cannot be empty.",
+                ephemeral=True
+            )
+
+            return
+
         await self.cog.rename_channel(
             interaction,
             self.channel,
-            str(
-                self.name_input.value
-            )
+            new_name
         )
 
 
@@ -1347,7 +1511,7 @@ class LimitModal(
             limit = int(
                 str(
                     self.limit_input.value
-                )
+                ).strip()
             )
 
             if limit < 0 or limit > 99:
