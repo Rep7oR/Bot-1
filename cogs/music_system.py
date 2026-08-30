@@ -1,2406 +1,2406 @@
-import asyncio
-import json
-import os
+# import asyncio
+# import json
+# import os
 
-import discord
-from discord import app_commands
-from discord.ext import commands, tasks
-import yt_dlp
+# import discord
+# from discord import app_commands
+# from discord.ext import commands, tasks
+# import yt_dlp
 
 
-# =========================================================
-# CONFIG
-# =========================================================
+# # =========================================================
+# # CONFIG
+# # =========================================================
 
-CONFIG_FILE = "music_config.json"
+# CONFIG_FILE = "music_config.json"
 
-DEFAULT_VOLUME = 0.70
+# DEFAULT_VOLUME = 0.70
 
-WATCHDOG_INTERVAL = 20
+# WATCHDOG_INTERVAL = 20
 
-MUSIC_SOURCE = os.getenv("MALAYALAM_SOURCE", "").strip()
+# MUSIC_SOURCE = os.getenv("MALAYALAM_SOURCE", "").strip()
 
 
-# =========================================================
-# YT-DLP
-# =========================================================
+# # =========================================================
+# # YT-DLP
+# # =========================================================
 
-YTDL_OPTIONS = {
-    "format": "bestaudio/best",
-    "quiet": True,
-    "no_warnings": True,
-    "noplaylist": False,
-    "source_address": "0.0.0.0",
-}
+# YTDL_OPTIONS = {
+#     "format": "bestaudio/best",
+#     "quiet": True,
+#     "no_warnings": True,
+#     "noplaylist": False,
+#     "source_address": "0.0.0.0",
+# }
 
 
-# =========================================================
-# FFMPEG
-# =========================================================
+# # =========================================================
+# # FFMPEG
+# # =========================================================
 
-FFMPEG_BEFORE_OPTIONS = (
-    "-reconnect 1 "
-    "-reconnect_streamed 1 "
-    "-reconnect_delay_max 5"
-)
+# FFMPEG_BEFORE_OPTIONS = (
+#     "-reconnect 1 "
+#     "-reconnect_streamed 1 "
+#     "-reconnect_delay_max 5"
+# )
 
-FFMPEG_OPTIONS = (
-    "-vn "
-    "-loglevel warning"
-)
+# FFMPEG_OPTIONS = (
+#     "-vn "
+#     "-loglevel warning"
+# )
 
 
-# =========================================================
-# CONFIG FILE FUNCTIONS
-# =========================================================
+# # =========================================================
+# # CONFIG FILE FUNCTIONS
+# # =========================================================
 
-def load_music_config():
+# def load_music_config():
 
-    if not os.path.exists(CONFIG_FILE):
-        return {}
+#     if not os.path.exists(CONFIG_FILE):
+#         return {}
 
-    try:
+#     try:
 
-        with open(
-            CONFIG_FILE,
-            "r",
-            encoding="utf-8"
-        ) as f:
+#         with open(
+#             CONFIG_FILE,
+#             "r",
+#             encoding="utf-8"
+#         ) as f:
 
-            return json.load(f)
+#             return json.load(f)
 
-    except Exception as e:
+#     except Exception as e:
 
-        print(
-            f"❌ Failed to load music config: {e}"
-        )
+#         print(
+#             f"❌ Failed to load music config: {e}"
+#         )
 
-        return {}
+#         return {}
 
 
-def save_music_config(config):
+# def save_music_config(config):
 
-    try:
+#     try:
 
-        with open(
-            CONFIG_FILE,
-            "w",
-            encoding="utf-8"
-        ) as f:
+#         with open(
+#             CONFIG_FILE,
+#             "w",
+#             encoding="utf-8"
+#         ) as f:
 
-            json.dump(
-                config,
-                f,
-                indent=4
-            )
+#             json.dump(
+#                 config,
+#                 f,
+#                 indent=4
+#             )
 
-    except Exception as e:
+#     except Exception as e:
 
-        print(
-            f"❌ Failed to save music config: {e}"
-        )
+#         print(
+#             f"❌ Failed to save music config: {e}"
+#         )
 
 
-# =========================================================
-# MUSIC COG
-# =========================================================
+# # =========================================================
+# # MUSIC COG
+# # =========================================================
 
-class MusicSystem(commands.Cog):
+# class MusicSystem(commands.Cog):
 
-    def __init__(self, bot):
+#     def __init__(self, bot):
 
-        self.bot = bot
+#         self.bot = bot
 
-        self.config = load_music_config()
+#         self.config = load_music_config()
 
-        self.players = {}
+#         self.players = {}
 
-        self.connecting = set()
+#         self.connecting = set()
 
-        self.music_watchdog.start()
+#         self.music_watchdog.start()
 
-    # =====================================================
-    # COG UNLOAD
-    # =====================================================
+#     # =====================================================
+#     # COG UNLOAD
+#     # =====================================================
 
-    def cog_unload(self):
+#     def cog_unload(self):
 
-        self.music_watchdog.cancel()
+#         self.music_watchdog.cancel()
 
-    # =====================================================
-    # GET PLAYER
-    # =====================================================
+#     # =====================================================
+#     # GET PLAYER
+#     # =====================================================
 
-    def get_player(
-        self,
-        guild_id
-    ):
+#     def get_player(
+#         self,
+#         guild_id
+#     ):
 
-        return self.players.get(
-            guild_id
-        )
+#         return self.players.get(
+#             guild_id
+#         )
 
-    # =====================================================
-    # GET CONFIG
-    # =====================================================
+#     # =====================================================
+#     # GET CONFIG
+#     # =====================================================
 
-    def get_guild_config(
-        self,
-        guild_id
-    ):
+#     def get_guild_config(
+#         self,
+#         guild_id
+#     ):
 
-        return self.config.get(
-            str(guild_id)
-        )
+#         return self.config.get(
+#             str(guild_id)
+#         )
 
-    # =====================================================
-    # /SETMUSIC
-    # =====================================================
+#     # =====================================================
+#     # /SETMUSIC
+#     # =====================================================
 
-    @app_commands.command(
-        name="setmusic",
-        description="Create the 24/7 Malayalam music system."
-    )
-    @app_commands.describe(
-        category="Category where the music channels will be created."
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def setmusic(
-        self,
-        interaction: discord.Interaction,
-        category: discord.CategoryChannel
-    ):
+#     @app_commands.command(
+#         name="setmusic",
+#         description="Create the 24/7 Malayalam music system."
+#     )
+#     @app_commands.describe(
+#         category="Category where the music channels will be created."
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def setmusic(
+#         self,
+#         interaction: discord.Interaction,
+#         category: discord.CategoryChannel
+#     ):
 
-        guild = interaction.guild
+#         guild = interaction.guild
 
-        if guild is None:
+#         if guild is None:
 
-            await interaction.response.send_message(
-                "❌ This command can only be used in a server.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "❌ This command can only be used in a server.",
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        # -------------------------------------------------
-        # CHECK SOURCE
-        # -------------------------------------------------
+#         # -------------------------------------------------
+#         # CHECK SOURCE
+#         # -------------------------------------------------
 
-        if not MUSIC_SOURCE:
+#         if not MUSIC_SOURCE:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "❌ `MALAYALAM_SOURCE` is not configured "
-                "in Render Environment Variables.",
+#                 "❌ `MALAYALAM_SOURCE` is not configured "
+#                 "in Render Environment Variables.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        # -------------------------------------------------
-        # CHECK EXISTING
-        # -------------------------------------------------
+#         # -------------------------------------------------
+#         # CHECK EXISTING
+#         # -------------------------------------------------
 
-        existing = self.get_guild_config(
-            guild.id
-        )
+#         existing = self.get_guild_config(
+#             guild.id
+#         )
 
-        if existing:
+#         if existing:
 
-            voice = guild.get_channel(
-                existing.get(
-                    "voice_channel_id"
-                )
-            )
+#             voice = guild.get_channel(
+#                 existing.get(
+#                     "voice_channel_id"
+#                 )
+#             )
 
-            text = guild.get_channel(
-                existing.get(
-                    "text_channel_id"
-                )
-            )
+#             text = guild.get_channel(
+#                 existing.get(
+#                     "text_channel_id"
+#                 )
+#             )
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "⚠️ **Music system already exists.**\n\n"
+#                 "⚠️ **Music system already exists.**\n\n"
 
-                f"🎧 Voice: "
-                f"{voice.mention if voice else 'Missing'}\n"
+#                 f"🎧 Voice: "
+#                 f"{voice.mention if voice else 'Missing'}\n"
 
-                f"💬 Controls: "
-                f"{text.mention if text else 'Missing'}\n\n"
+#                 f"💬 Controls: "
+#                 f"{text.mention if text else 'Missing'}\n\n"
 
-                "Use `/musicsetup remove` first.",
+#                 "Use `/musicsetup remove` first.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        await interaction.response.defer(
-            ephemeral=True
-        )
+#         await interaction.response.defer(
+#             ephemeral=True
+#         )
 
-        print("")
-        print("=" * 60)
-        print("🎵 MUSIC SETUP")
-        print("=" * 60)
-        print(f"Server: {guild.name}")
-        print(f"Category: {category.name}")
+#         print("")
+#         print("=" * 60)
+#         print("🎵 MUSIC SETUP")
+#         print("=" * 60)
+#         print(f"Server: {guild.name}")
+#         print(f"Category: {category.name}")
 
-        # =================================================
-        # VOICE PERMISSIONS
-        # =================================================
+#         # =================================================
+#         # VOICE PERMISSIONS
+#         # =================================================
 
-        voice_overwrites = {
+#         voice_overwrites = {
 
-            guild.default_role:
-                discord.PermissionOverwrite(
-                    view_channel=True,
-                    connect=True,
-                    speak=False
-                )
-        }
+#             guild.default_role:
+#                 discord.PermissionOverwrite(
+#                     view_channel=True,
+#                     connect=True,
+#                     speak=False
+#                 )
+#         }
 
-        # =================================================
-        # CREATE VOICE
-        # =================================================
+#         # =================================================
+#         # CREATE VOICE
+#         # =================================================
 
-        try:
+#         try:
 
-            voice_channel = await guild.create_voice_channel(
+#             voice_channel = await guild.create_voice_channel(
 
-                name="Malayalam Music 🎵",
+#                 name="Malayalam Music 🎵",
 
-                category=category,
+#                 category=category,
 
-                overwrites=voice_overwrites,
+#                 overwrites=voice_overwrites,
 
-                reason="24/7 Malayalam Music"
-            )
+#                 reason="24/7 Malayalam Music"
+#             )
 
-            print(
-                f"✅ Voice created: "
-                f"{voice_channel.name}"
-            )
+#             print(
+#                 f"✅ Voice created: "
+#                 f"{voice_channel.name}"
+#             )
 
-        except Exception as e:
+#         except Exception as e:
 
-            print(
-                f"❌ Voice channel error: "
-                f"{type(e).__name__}: {e}"
-            )
+#             print(
+#                 f"❌ Voice channel error: "
+#                 f"{type(e).__name__}: {e}"
+#             )
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                f"❌ Could not create music voice channel.\n\n"
-                f"`{type(e).__name__}: {e}`",
+#                 f"❌ Could not create music voice channel.\n\n"
+#                 f"`{type(e).__name__}: {e}`",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        # =================================================
-        # TEXT PERMISSIONS
-        # =================================================
+#         # =================================================
+#         # TEXT PERMISSIONS
+#         # =================================================
 
-        text_overwrites = {
+#         text_overwrites = {
 
-            guild.default_role:
-                discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=False,
-                    read_message_history=True
-                )
-        }
+#             guild.default_role:
+#                 discord.PermissionOverwrite(
+#                     view_channel=True,
+#                     send_messages=False,
+#                     read_message_history=True
+#                 )
+#         }
 
-        # =================================================
-        # CREATE CONTROL CHANNEL
-        # =================================================
+#         # =================================================
+#         # CREATE CONTROL CHANNEL
+#         # =================================================
 
-        try:
+#         try:
 
-            text_channel = await guild.create_text_channel(
+#             text_channel = await guild.create_text_channel(
 
-                name="music-controls",
+#                 name="music-controls",
 
-                category=category,
+#                 category=category,
 
-                overwrites=text_overwrites,
+#                 overwrites=text_overwrites,
 
-                topic="24/7 Malayalam Music Controls",
+#                 topic="24/7 Malayalam Music Controls",
 
-                reason="24/7 Malayalam Music"
-            )
+#                 reason="24/7 Malayalam Music"
+#             )
 
-            print(
-                f"✅ Control channel created: "
-                f"{text_channel.name}"
-            )
+#             print(
+#                 f"✅ Control channel created: "
+#                 f"{text_channel.name}"
+#             )
 
-        except Exception as e:
+#         except Exception as e:
 
-            print(
-                f"❌ Text channel error: {e}"
-            )
+#             print(
+#                 f"❌ Text channel error: {e}"
+#             )
 
-            try:
-                await voice_channel.delete()
-            except:
-                pass
+#             try:
+#                 await voice_channel.delete()
+#             except:
+#                 pass
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                f"❌ Could not create music control channel.\n\n"
-                f"`{type(e).__name__}: {e}`",
+#                 f"❌ Could not create music control channel.\n\n"
+#                 f"`{type(e).__name__}: {e}`",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        # =================================================
-        # SAVE CONFIG
-        # =================================================
+#         # =================================================
+#         # SAVE CONFIG
+#         # =================================================
 
-        self.config[
-            str(guild.id)
-        ] = {
+#         self.config[
+#             str(guild.id)
+#         ] = {
 
-            "category_id":
-                category.id,
+#             "category_id":
+#                 category.id,
 
-            "voice_channel_id":
-                voice_channel.id,
+#             "voice_channel_id":
+#                 voice_channel.id,
 
-            "text_channel_id":
-                text_channel.id
-        }
+#             "text_channel_id":
+#                 text_channel.id
+#         }
 
-        save_music_config(
-            self.config
-        )
+#         save_music_config(
+#             self.config
+#         )
 
-        # =================================================
-        # PLAYER DATA
-        # =================================================
+#         # =================================================
+#         # PLAYER DATA
+#         # =================================================
 
-        self.players[
-            guild.id
-        ] = {
+#         self.players[
+#             guild.id
+#         ] = {
 
-            "voice_channel_id":
-                voice_channel.id,
+#             "voice_channel_id":
+#                 voice_channel.id,
 
-            "text_channel_id":
-                text_channel.id,
+#             "text_channel_id":
+#                 text_channel.id,
 
-            "message_id":
-                None,
+#             "message_id":
+#                 None,
 
-            "volume":
-                DEFAULT_VOLUME,
+#             "volume":
+#                 DEFAULT_VOLUME,
 
-            "paused":
-                False,
+#             "paused":
+#                 False,
 
-            "starting":
-                False,
+#             "starting":
+#                 False,
 
-            "title":
-                "Connecting...",
+#             "title":
+#                 "Connecting...",
 
-            "url":
-                MUSIC_SOURCE
-        }
+#             "url":
+#                 MUSIC_SOURCE
+#         }
 
-        # =================================================
-        # SEND CONTROL PANEL
-        # =================================================
+#         # =================================================
+#         # SEND CONTROL PANEL
+#         # =================================================
 
-        panel = await self.send_panel(
-            guild
-        )
+#         panel = await self.send_panel(
+#             guild
+#         )
 
-        if panel:
+#         if panel:
 
-            self.players[
-                guild.id
-            ]["message_id"] = panel.id
+#             self.players[
+#                 guild.id
+#             ]["message_id"] = panel.id
 
-        # =================================================
-        # CONNECT
-        # =================================================
+#         # =================================================
+#         # CONNECT
+#         # =================================================
 
-        connected = await self.connect_to_voice(
-            guild
-        )
+#         connected = await self.connect_to_voice(
+#             guild
+#         )
 
-        if connected:
+#         if connected:
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                "✅ **Malayalam Music System Started!**\n\n"
+#                 "✅ **Malayalam Music System Started!**\n\n"
 
-                f"🎧 Voice: {voice_channel.mention}\n"
-                f"💬 Controls: {text_channel.mention}\n\n"
+#                 f"🎧 Voice: {voice_channel.mention}\n"
+#                 f"💬 Controls: {text_channel.mention}\n\n"
 
-                "🎵 Music is now running.\n"
-                "🔄 Automatic reconnection is enabled.",
+#                 "🎵 Music is now running.\n"
+#                 "🔄 Automatic reconnection is enabled.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-        else:
+#         else:
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                "⚠️ **Music channels created, "
-                "but voice connection failed.**\n\n"
+#                 "⚠️ **Music channels created, "
+#                 "but voice connection failed.**\n\n"
 
-                f"🎧 Voice: {voice_channel.mention}\n"
-                f"💬 Controls: {text_channel.mention}\n\n"
+#                 f"🎧 Voice: {voice_channel.mention}\n"
+#                 f"💬 Controls: {text_channel.mention}\n\n"
 
-                "The watchdog will continue trying.\n\n"
+#                 "The watchdog will continue trying.\n\n"
 
-                "Use `/voicetest` to diagnose the voice connection.",
+#                 "Use `/voicetest` to diagnose the voice connection.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-    # =====================================================
-    # MUSIC SETUP GROUP
-    # =====================================================
+#     # =====================================================
+#     # MUSIC SETUP GROUP
+#     # =====================================================
 
-    musicsetup = app_commands.Group(
+#     musicsetup = app_commands.Group(
 
-        name="musicsetup",
+#         name="musicsetup",
 
-        description="Manage the music system."
-    )
+#         description="Manage the music system."
+#     )
 
-    # =====================================================
-    # /MUSICSETUP REMOVE
-    # =====================================================
+#     # =====================================================
+#     # /MUSICSETUP REMOVE
+#     # =====================================================
 
-    @musicsetup.command(
-        name="remove",
-        description="Remove the complete music system."
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def musicsetup_remove(
-        self,
-        interaction: discord.Interaction
-    ):
+#     @musicsetup.command(
+#         name="remove",
+#         description="Remove the complete music system."
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def musicsetup_remove(
+#         self,
+#         interaction: discord.Interaction
+#     ):
 
-        guild = interaction.guild
+#         guild = interaction.guild
 
-        if guild is None:
+#         if guild is None:
 
-            await interaction.response.send_message(
-                "❌ Server only.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "❌ Server only.",
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        await interaction.response.defer(
-            ephemeral=True
-        )
+#         await interaction.response.defer(
+#             ephemeral=True
+#         )
 
-        removed = await self.remove_system(
-            guild
-        )
+#         removed = await self.remove_system(
+#             guild
+#         )
 
-        if removed:
+#         if removed:
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                "🗑️ **Music System Removed**\n\n"
+#                 "🗑️ **Music System Removed**\n\n"
 
-                "✅ Bot disconnected\n"
-                "✅ Voice channel deleted\n"
-                "✅ Control channel deleted\n"
-                "✅ Configuration deleted\n"
-                "✅ Player data cleared\n\n"
+#                 "✅ Bot disconnected\n"
+#                 "✅ Voice channel deleted\n"
+#                 "✅ Control channel deleted\n"
+#                 "✅ Configuration deleted\n"
+#                 "✅ Player data cleared\n\n"
 
-                "You can now use `/setmusic` again.",
+#                 "You can now use `/setmusic` again.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-        else:
+#         else:
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                "ℹ️ No music system was configured.",
+#                 "ℹ️ No music system was configured.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-    # =====================================================
-    # REMOVE SYSTEM
-    # =====================================================
+#     # =====================================================
+#     # REMOVE SYSTEM
+#     # =====================================================
 
-    async def remove_system(
-        self,
-        guild
-    ):
+#     async def remove_system(
+#         self,
+#         guild
+#     ):
 
-        guild_id = guild.id
+#         guild_id = guild.id
 
-        config = self.config.get(
-            str(guild_id)
-        )
+#         config = self.config.get(
+#             str(guild_id)
+#         )
 
-        player = self.players.get(
-            guild_id
-        )
+#         player = self.players.get(
+#             guild_id
+#         )
 
-        if not config and not player:
+#         if not config and not player:
 
-            return False
+#             return False
 
-        # -------------------------------------------------
-        # DISCONNECT
-        # -------------------------------------------------
+#         # -------------------------------------------------
+#         # DISCONNECT
+#         # -------------------------------------------------
 
-        voice_client = guild.voice_client
+#         voice_client = guild.voice_client
 
-        if voice_client:
+#         if voice_client:
 
-            try:
+#             try:
 
-                if voice_client.is_playing():
+#                 if voice_client.is_playing():
 
-                    voice_client.stop()
+#                     voice_client.stop()
 
-            except:
-                pass
+#             except:
+#                 pass
 
-            try:
+#             try:
 
-                await voice_client.disconnect(
-                    force=True
-                )
+#                 await voice_client.disconnect(
+#                     force=True
+#                 )
 
-            except Exception as e:
+#             except Exception as e:
 
-                print(
-                    f"⚠️ Disconnect error: {e}"
-                )
+#                 print(
+#                     f"⚠️ Disconnect error: {e}"
+#                 )
 
-        # -------------------------------------------------
-        # CHANNEL IDS
-        # -------------------------------------------------
+#         # -------------------------------------------------
+#         # CHANNEL IDS
+#         # -------------------------------------------------
 
-        voice_id = None
-        text_id = None
+#         voice_id = None
+#         text_id = None
 
-        if config:
+#         if config:
 
-            voice_id = config.get(
-                "voice_channel_id"
-            )
+#             voice_id = config.get(
+#                 "voice_channel_id"
+#             )
 
-            text_id = config.get(
-                "text_channel_id"
-            )
+#             text_id = config.get(
+#                 "text_channel_id"
+#             )
 
-        if player:
+#         if player:
 
-            voice_id = (
-                voice_id
-                or player.get(
-                    "voice_channel_id"
-                )
-            )
+#             voice_id = (
+#                 voice_id
+#                 or player.get(
+#                     "voice_channel_id"
+#                 )
+#             )
 
-            text_id = (
-                text_id
-                or player.get(
-                    "text_channel_id"
-                )
-            )
+#             text_id = (
+#                 text_id
+#                 or player.get(
+#                     "text_channel_id"
+#                 )
+#             )
 
-        # -------------------------------------------------
-        # DELETE TEXT
-        # -------------------------------------------------
+#         # -------------------------------------------------
+#         # DELETE TEXT
+#         # -------------------------------------------------
 
-        if text_id:
+#         if text_id:
 
-            channel = guild.get_channel(
-                text_id
-            )
+#             channel = guild.get_channel(
+#                 text_id
+#             )
 
-            if channel:
+#             if channel:
 
-                try:
+#                 try:
 
-                    await channel.delete(
-                        reason="Music system removed"
-                    )
+#                     await channel.delete(
+#                         reason="Music system removed"
+#                     )
 
-                    print(
-                        "🗑️ Deleted music control channel."
-                    )
+#                     print(
+#                         "🗑️ Deleted music control channel."
+#                     )
 
-                except Exception as e:
+#                 except Exception as e:
 
-                    print(
-                        f"⚠️ Text deletion error: {e}"
-                    )
+#                     print(
+#                         f"⚠️ Text deletion error: {e}"
+#                     )
 
-        # -------------------------------------------------
-        # DELETE VOICE
-        # -------------------------------------------------
+#         # -------------------------------------------------
+#         # DELETE VOICE
+#         # -------------------------------------------------
 
-        if voice_id:
+#         if voice_id:
 
-            channel = guild.get_channel(
-                voice_id
-            )
+#             channel = guild.get_channel(
+#                 voice_id
+#             )
 
-            if channel:
+#             if channel:
 
-                try:
+#                 try:
 
-                    await channel.delete(
-                        reason="Music system removed"
-                    )
+#                     await channel.delete(
+#                         reason="Music system removed"
+#                     )
 
-                    print(
-                        "🗑️ Deleted music voice channel."
-                    )
+#                     print(
+#                         "🗑️ Deleted music voice channel."
+#                     )
 
-                except Exception as e:
+#                 except Exception as e:
 
-                    print(
-                        f"⚠️ Voice deletion error: {e}"
-                    )
+#                     print(
+#                         f"⚠️ Voice deletion error: {e}"
+#                     )
 
-        # -------------------------------------------------
-        # CLEAR DATA
-        # -------------------------------------------------
+#         # -------------------------------------------------
+#         # CLEAR DATA
+#         # -------------------------------------------------
 
-        self.config.pop(
-            str(guild_id),
-            None
-        )
+#         self.config.pop(
+#             str(guild_id),
+#             None
+#         )
 
-        self.players.pop(
-            guild_id,
-            None
-        )
+#         self.players.pop(
+#             guild_id,
+#             None
+#         )
 
-        self.connecting.discard(
-            guild_id
-        )
+#         self.connecting.discard(
+#             guild_id
+#         )
 
-        save_music_config(
-            self.config
-        )
+#         save_music_config(
+#             self.config
+#         )
 
-        return True
+#         return True
 
-    # =====================================================
-    # /VOICETEST
-    # =====================================================
+#     # =====================================================
+#     # /VOICETEST
+#     # =====================================================
 
-    @app_commands.command(
-        name="voicetest",
-        description="Test the Discord voice connection."
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def voicetest(
-        self,
-        interaction: discord.Interaction
-    ):
+#     @app_commands.command(
+#         name="voicetest",
+#         description="Test the Discord voice connection."
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def voicetest(
+#         self,
+#         interaction: discord.Interaction
+#     ):
 
-        guild = interaction.guild
+#         guild = interaction.guild
 
-        if guild is None:
+#         if guild is None:
 
-            await interaction.response.send_message(
-                "❌ Server only.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "❌ Server only.",
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        config = self.get_guild_config(
-            guild.id
-        )
+#         config = self.get_guild_config(
+#             guild.id
+#         )
 
-        if not config:
+#         if not config:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "❌ Music system is not configured.\n"
-                "Run `/setmusic` first.",
+#                 "❌ Music system is not configured.\n"
+#                 "Run `/setmusic` first.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        channel = guild.get_channel(
-            config.get(
-                "voice_channel_id"
-            )
-        )
+#         channel = guild.get_channel(
+#             config.get(
+#                 "voice_channel_id"
+#             )
+#         )
 
-        if channel is None:
+#         if channel is None:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "❌ Music voice channel does not exist.",
+#                 "❌ Music voice channel does not exist.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        await interaction.response.defer(
-            ephemeral=True
-        )
+#         await interaction.response.defer(
+#             ephemeral=True
+#         )
 
-        print("")
-        print("=" * 70)
-        print("🎧 VOICE CONNECTION TEST")
-        print("=" * 70)
+#         print("")
+#         print("=" * 70)
+#         print("🎧 VOICE CONNECTION TEST")
+#         print("=" * 70)
 
-        print(
-            f"Server: {guild.name}"
-        )
+#         print(
+#             f"Server: {guild.name}"
+#         )
 
-        print(
-            f"Guild ID: {guild.id}"
-        )
+#         print(
+#             f"Guild ID: {guild.id}"
+#         )
 
-        print(
-            f"Voice Channel: {channel.name}"
-        )
+#         print(
+#             f"Voice Channel: {channel.name}"
+#         )
 
-        print(
-            f"Voice Channel ID: {channel.id}"
-        )
+#         print(
+#             f"Voice Channel ID: {channel.id}"
+#         )
 
-        print(
-            f"discord.py: {discord.__version__}"
-        )
+#         print(
+#             f"discord.py: {discord.__version__}"
+#         )
 
-        # -------------------------------------------------
-        # CHECK PYNACL
-        # -------------------------------------------------
+#         # -------------------------------------------------
+#         # CHECK PYNACL
+#         # -------------------------------------------------
 
-        try:
+#         try:
 
-            import nacl
+#             import nacl
 
-            print(
-                f"✅ PyNaCl: "
-                f"{getattr(nacl, '__version__', 'installed')}"
-            )
+#             print(
+#                 f"✅ PyNaCl: "
+#                 f"{getattr(nacl, '__version__', 'installed')}"
+#             )
 
-        except Exception as e:
+#         except Exception as e:
 
-            print(
-                f"❌ PyNaCl: {e}"
-            )
+#             print(
+#                 f"❌ PyNaCl: {e}"
+#             )
 
-        # -------------------------------------------------
-        # CHECK DAVEY
-        # -------------------------------------------------
+#         # -------------------------------------------------
+#         # CHECK DAVEY
+#         # -------------------------------------------------
 
-        try:
+#         try:
 
-            import davey
+#             import davey
 
-            print(
-                f"✅ davey: "
-                f"{getattr(davey, '__version__', 'installed')}"
-            )
+#             print(
+#                 f"✅ davey: "
+#                 f"{getattr(davey, '__version__', 'installed')}"
+#             )
 
-        except Exception as e:
+#         except Exception as e:
 
-            print(
-                f"❌ davey: {e}"
-            )
+#             print(
+#                 f"❌ davey: {e}"
+#             )
 
-        print(
-            f"Voice States Intent: "
-            f"{self.bot.intents.voice_states}"
-        )
+#         print(
+#             f"Voice States Intent: "
+#             f"{self.bot.intents.voice_states}"
+#         )
 
-        try:
+#         try:
 
-            # -------------------------------------------------
-            # DISCONNECT OLD CONNECTION
-            # -------------------------------------------------
+#             # -------------------------------------------------
+#             # DISCONNECT OLD CONNECTION
+#             # -------------------------------------------------
 
-            old_client = guild.voice_client
+#             old_client = guild.voice_client
 
-            if old_client:
+#             if old_client:
 
-                print(
-                    "⚠️ Disconnecting old voice client..."
-                )
+#                 print(
+#                     "⚠️ Disconnecting old voice client..."
+#                 )
 
-                try:
+#                 try:
 
-                    await old_client.disconnect(
-                        force=True
-                    )
+#                     await old_client.disconnect(
+#                         force=True
+#                     )
 
-                except:
-                    pass
+#                 except:
+#                     pass
 
-                await asyncio.sleep(
-                    3
-                )
+#                 await asyncio.sleep(
+#                     3
+#                 )
 
-            # -------------------------------------------------
-            # CONNECT
-            # -------------------------------------------------
+#             # -------------------------------------------------
+#             # CONNECT
+#             # -------------------------------------------------
 
-            print(
-                "🔌 Connecting..."
-            )
+#             print(
+#                 "🔌 Connecting..."
+#             )
 
-            voice_client = await channel.connect(
+#             voice_client = await channel.connect(
 
-                timeout=60,
+#                 timeout=60,
 
-                reconnect=True
-            )
+#                 reconnect=True
+#             )
 
-            print(
-                "🟢 VOICE CONNECTION COMPLETE"
-            )
+#             print(
+#                 "🟢 VOICE CONNECTION COMPLETE"
+#             )
 
-            print(
-                f"Connected: "
-                f"{voice_client.is_connected()}"
-            )
+#             print(
+#                 f"Connected: "
+#                 f"{voice_client.is_connected()}"
+#             )
 
-            print(
-                f"Channel: "
-                f"{voice_client.channel}"
-            )
+#             print(
+#                 f"Channel: "
+#                 f"{voice_client.channel}"
+#             )
 
-            print(
-                f"Endpoint: "
-                f"{voice_client.endpoint}"
-            )
+#             print(
+#                 f"Endpoint: "
+#                 f"{voice_client.endpoint}"
+#             )
 
-            print(
-                f"Session ID: "
-                f"{voice_client.session_id}"
-            )
+#             print(
+#                 f"Session ID: "
+#                 f"{voice_client.session_id}"
+#             )
 
-            print("=" * 70)
+#             print("=" * 70)
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                "🟢 **VOICE CONNECTION SUCCESSFUL**\n\n"
+#                 "🟢 **VOICE CONNECTION SUCCESSFUL**\n\n"
 
-                f"🎧 Channel: {channel.mention}\n"
-                f"🔌 Connected: `{voice_client.is_connected()}`\n"
-                f"📡 Endpoint: `{voice_client.endpoint}`\n\n"
+#                 f"🎧 Channel: {channel.mention}\n"
+#                 f"🔌 Connected: `{voice_client.is_connected()}`\n"
+#                 f"📡 Endpoint: `{voice_client.endpoint}`\n\n"
 
-                "Discord voice connection is working.",
+#                 "Discord voice connection is working.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-        except asyncio.TimeoutError:
+#         except asyncio.TimeoutError:
 
-            print(
-                "❌ VOICE CONNECTION TIMEOUT"
-            )
+#             print(
+#                 "❌ VOICE CONNECTION TIMEOUT"
+#             )
 
-            print("=" * 70)
+#             print("=" * 70)
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                "🔴 **Voice connection timed out.**\n\n"
+#                 "🔴 **Voice connection timed out.**\n\n"
 
-                "Check the Render logs.",
+#                 "Check the Render logs.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-        except discord.Forbidden as e:
+#         except discord.Forbidden as e:
 
-            print(
-                f"❌ DISCORD FORBIDDEN: {e}"
-            )
+#             print(
+#                 f"❌ DISCORD FORBIDDEN: {e}"
+#             )
 
-            print("=" * 70)
+#             print("=" * 70)
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                f"🔴 **Discord rejected the connection.**\n\n"
-                f"`{e}`",
+#                 f"🔴 **Discord rejected the connection.**\n\n"
+#                 f"`{e}`",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-        except discord.ClientException as e:
+#         except discord.ClientException as e:
 
-            print(
-                f"❌ DISCORD CLIENT ERROR: {e}"
-            )
+#             print(
+#                 f"❌ DISCORD CLIENT ERROR: {e}"
+#             )
 
-            print("=" * 70)
+#             print("=" * 70)
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                f"🔴 **Discord client error.**\n\n"
-                f"`{e}`",
+#                 f"🔴 **Discord client error.**\n\n"
+#                 f"`{e}`",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-        except Exception as e:
+#         except Exception as e:
 
-            print(
-                f"❌ VOICE ERROR"
-            )
+#             print(
+#                 f"❌ VOICE ERROR"
+#             )
 
-            print(
-                f"Type: {type(e).__name__}"
-            )
+#             print(
+#                 f"Type: {type(e).__name__}"
+#             )
 
-            print(
-                f"Error: {e}"
-            )
+#             print(
+#                 f"Error: {e}"
+#             )
 
-            print("=" * 70)
+#             print("=" * 70)
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                "🔴 **Voice connection failed.**\n\n"
+#                 "🔴 **Voice connection failed.**\n\n"
 
-                f"Type: `{type(e).__name__}`\n"
-                f"Error: `{e}`",
+#                 f"Type: `{type(e).__name__}`\n"
+#                 f"Error: `{e}`",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-    # =====================================================
-    # CONNECT TO VOICE
-    # =====================================================
+#     # =====================================================
+#     # CONNECT TO VOICE
+#     # =====================================================
 
-    async def connect_to_voice(
-        self,
-        guild
-    ):
+#     async def connect_to_voice(
+#         self,
+#         guild
+#     ):
 
-        if guild.id in self.connecting:
+#         if guild.id in self.connecting:
 
-            print(
-                f"⏳ Already connecting "
-                f"to {guild.name}"
-            )
+#             print(
+#                 f"⏳ Already connecting "
+#                 f"to {guild.name}"
+#             )
 
-            return False
+#             return False
 
-        self.connecting.add(
-            guild.id
-        )
+#         self.connecting.add(
+#             guild.id
+#         )
 
-        try:
+#         try:
 
-            player = self.players.get(
-                guild.id
-            )
+#             player = self.players.get(
+#                 guild.id
+#             )
 
-            if not player:
+#             if not player:
 
-                return False
+#                 return False
 
-            channel = guild.get_channel(
-                player[
-                    "voice_channel_id"
-                ]
-            )
+#             channel = guild.get_channel(
+#                 player[
+#                     "voice_channel_id"
+#                 ]
+#             )
 
-            if not channel:
+#             if not channel:
 
-                print(
-                    "❌ Music voice channel missing."
-                )
+#                 print(
+#                     "❌ Music voice channel missing."
+#                 )
 
-                return False
+#                 return False
 
-            # -------------------------------------------------
-            # CHECK EXISTING
-            # -------------------------------------------------
+#             # -------------------------------------------------
+#             # CHECK EXISTING
+#             # -------------------------------------------------
 
-            voice_client = guild.voice_client
+#             voice_client = guild.voice_client
 
-            if voice_client:
+#             if voice_client:
 
-                if voice_client.is_connected():
+#                 if voice_client.is_connected():
 
-                    if (
-                        voice_client.channel.id
-                        != channel.id
-                    ):
+#                     if (
+#                         voice_client.channel.id
+#                         != channel.id
+#                     ):
 
-                        await voice_client.move_to(
-                            channel
-                        )
+#                         await voice_client.move_to(
+#                             channel
+#                         )
 
-                    return True
+#                     return True
 
-                try:
+#                 try:
 
-                    await voice_client.disconnect(
-                        force=True
-                    )
+#                     await voice_client.disconnect(
+#                         force=True
+#                     )
 
-                except:
-                    pass
+#                 except:
+#                     pass
 
-                await asyncio.sleep(
-                    2
-                )
+#                 await asyncio.sleep(
+#                     2
+#                 )
 
-            # -------------------------------------------------
-            # CONNECT
-            # -------------------------------------------------
+#             # -------------------------------------------------
+#             # CONNECT
+#             # -------------------------------------------------
 
-            print(
-                f"🔌 Connecting to "
-                f"{channel.name}..."
-            )
+#             print(
+#                 f"🔌 Connecting to "
+#                 f"{channel.name}..."
+#             )
 
-            voice_client = await channel.connect(
+#             voice_client = await channel.connect(
 
-                timeout=60,
+#                 timeout=60,
 
-                reconnect=True
-            )
+#                 reconnect=True
+#             )
 
-            print(
-                f"🟢 Connected to "
-                f"{channel.name}"
-            )
+#             print(
+#                 f"🟢 Connected to "
+#                 f"{channel.name}"
+#             )
 
-            # -------------------------------------------------
-            # START MUSIC
-            # -------------------------------------------------
+#             # -------------------------------------------------
+#             # START MUSIC
+#             # -------------------------------------------------
 
-            if (
-                not voice_client.is_playing()
-                and not voice_client.is_paused()
-            ):
+#             if (
+#                 not voice_client.is_playing()
+#                 and not voice_client.is_paused()
+#             ):
 
-                await self.start_music(
-                    guild,
-                    voice_client
-                )
+#                 await self.start_music(
+#                     guild,
+#                     voice_client
+#                 )
 
-            await self.update_panel(
-                guild
-            )
+#             await self.update_panel(
+#                 guild
+#             )
 
-            return True
+#             return True
 
-        except asyncio.TimeoutError:
+#         except asyncio.TimeoutError:
 
-            print(
-                "❌ Voice connection timeout."
-            )
+#             print(
+#                 "❌ Voice connection timeout."
+#             )
 
-            return False
+#             return False
 
-        except discord.Forbidden as e:
+#         except discord.Forbidden as e:
 
-            print(
-                f"❌ Discord Forbidden: {e}"
-            )
+#             print(
+#                 f"❌ Discord Forbidden: {e}"
+#             )
 
-            return False
+#             return False
 
-        except discord.ClientException as e:
+#         except discord.ClientException as e:
 
-            print(
-                f"❌ Discord ClientException: {e}"
-            )
+#             print(
+#                 f"❌ Discord ClientException: {e}"
+#             )
 
-            return False
+#             return False
 
-        except Exception as e:
+#         except Exception as e:
 
-            print(
-                f"❌ Voice connection error:"
-                f" {type(e).__name__}: {e}"
-            )
+#             print(
+#                 f"❌ Voice connection error:"
+#                 f" {type(e).__name__}: {e}"
+#             )
 
-            return False
+#             return False
 
-        finally:
+#         finally:
 
-            self.connecting.discard(
-                guild.id
-            )
+#             self.connecting.discard(
+#                 guild.id
+#             )
 
-    # =====================================================
-    # EXTRACT STREAM
-    # =====================================================
+#     # =====================================================
+#     # EXTRACT STREAM
+#     # =====================================================
 
-    async def extract_stream(
-        self,
-        source
-    ):
+#     async def extract_stream(
+#         self,
+#         source
+#     ):
 
-        loop = asyncio.get_running_loop()
+#         loop = asyncio.get_running_loop()
 
-        def extract():
+#         def extract():
 
-            try:
+#             try:
 
-                with yt_dlp.YoutubeDL(
-                    YTDL_OPTIONS
-                ) as ydl:
+#                 with yt_dlp.YoutubeDL(
+#                     YTDL_OPTIONS
+#                 ) as ydl:
 
-                    info = ydl.extract_info(
-                        source,
-                        download=False
-                    )
+#                     info = ydl.extract_info(
+#                         source,
+#                         download=False
+#                     )
 
-                    if not info:
+#                     if not info:
 
-                        return None
+#                         return None
 
-                    # -------------------------------------------------
-                    # PLAYLIST
-                    # -------------------------------------------------
+#                     # -------------------------------------------------
+#                     # PLAYLIST
+#                     # -------------------------------------------------
 
-                    if "entries" in info:
+#                     if "entries" in info:
 
-                        entries = [
-                            item
-                            for item in info["entries"]
-                            if item
-                        ]
+#                         entries = [
+#                             item
+#                             for item in info["entries"]
+#                             if item
+#                         ]
 
-                        if not entries:
+#                         if not entries:
 
-                            return None
+#                             return None
 
-                        info = entries[0]
+#                         info = entries[0]
 
-                    return {
+#                     return {
 
-                        "title":
-                            info.get(
-                                "title",
-                                "Malayalam Music"
-                            ),
+#                         "title":
+#                             info.get(
+#                                 "title",
+#                                 "Malayalam Music"
+#                             ),
 
-                        "stream_url":
-                            info.get(
-                                "url"
-                            ),
+#                         "stream_url":
+#                             info.get(
+#                                 "url"
+#                             ),
 
-                        "webpage_url":
-                            info.get(
-                                "webpage_url",
-                                source
-                            )
-                    }
+#                         "webpage_url":
+#                             info.get(
+#                                 "webpage_url",
+#                                 source
+#                             )
+#                     }
 
-            except Exception as e:
+#             except Exception as e:
 
-                print(
-                    f"❌ yt-dlp error:"
-                    f" {type(e).__name__}: {e}"
-                )
+#                 print(
+#                     f"❌ yt-dlp error:"
+#                     f" {type(e).__name__}: {e}"
+#                 )
 
-                return None
+#                 return None
 
-        return await loop.run_in_executor(
-            None,
-            extract
-        )
+#         return await loop.run_in_executor(
+#             None,
+#             extract
+#         )
 
-    # =====================================================
-    # START MUSIC
-    # =====================================================
+#     # =====================================================
+#     # START MUSIC
+#     # =====================================================
 
-    async def start_music(
-        self,
-        guild,
-        voice_client
-    ):
+#     async def start_music(
+#         self,
+#         guild,
+#         voice_client
+#     ):
 
-        player = self.players.get(
-            guild.id
-        )
+#         player = self.players.get(
+#             guild.id
+#         )
 
-        if not player:
+#         if not player:
 
-            return
+#             return
 
-        if player.get(
-            "starting",
-            False
-        ):
+#         if player.get(
+#             "starting",
+#             False
+#         ):
 
-            return
+#             return
 
-        if not voice_client.is_connected():
+#         if not voice_client.is_connected():
 
-            print(
-                "❌ Cannot start music. "
-                "Voice client is disconnected."
-            )
+#             print(
+#                 "❌ Cannot start music. "
+#                 "Voice client is disconnected."
+#             )
 
-            return
+#             return
 
-        if not MUSIC_SOURCE:
+#         if not MUSIC_SOURCE:
 
-            print(
-                "❌ MALAYALAM_SOURCE is empty."
-            )
+#             print(
+#                 "❌ MALAYALAM_SOURCE is empty."
+#             )
 
-            return
+#             return
 
-        player["starting"] = True
+#         player["starting"] = True
 
-        try:
+#         try:
 
-            print(
-                "🔎 Getting music stream..."
-            )
+#             print(
+#                 "🔎 Getting music stream..."
+#             )
 
-            stream = await self.extract_stream(
-                MUSIC_SOURCE
-            )
+#             stream = await self.extract_stream(
+#                 MUSIC_SOURCE
+#             )
 
-            if not stream:
+#             if not stream:
 
-                print(
-                    "❌ Could not extract stream."
-                )
+#                 print(
+#                     "❌ Could not extract stream."
+#                 )
 
-                player["title"] = (
-                    "Music source unavailable"
-                )
+#                 player["title"] = (
+#                     "Music source unavailable"
+#                 )
 
-                await self.update_panel(
-                    guild
-                )
+#                 await self.update_panel(
+#                     guild
+#                 )
 
-                return
+#                 return
 
-            stream_url = stream.get(
-                "stream_url"
-            )
+#             stream_url = stream.get(
+#                 "stream_url"
+#             )
 
-            if not stream_url:
+#             if not stream_url:
 
-                print(
-                    "❌ No stream URL returned."
-                )
+#                 print(
+#                     "❌ No stream URL returned."
+#                 )
 
-                return
+#                 return
 
-            title = stream.get(
-                "title",
-                "Malayalam Music"
-            )
+#             title = stream.get(
+#                 "title",
+#                 "Malayalam Music"
+#             )
 
-            webpage_url = stream.get(
-                "webpage_url",
-                MUSIC_SOURCE
-            )
+#             webpage_url = stream.get(
+#                 "webpage_url",
+#                 MUSIC_SOURCE
+#             )
 
-            player["title"] = title
+#             player["title"] = title
 
-            player["url"] = webpage_url
+#             player["url"] = webpage_url
 
-            # -------------------------------------------------
-            # FFMPEG OPUS
-            #
-            # FFmpeg encodes the stream directly to Opus.
-            # This avoids requiring local Opus encoding
-            # from discord.py.
-            # -------------------------------------------------
+#             # -------------------------------------------------
+#             # FFMPEG OPUS
+#             #
+#             # FFmpeg encodes the stream directly to Opus.
+#             # This avoids requiring local Opus encoding
+#             # from discord.py.
+#             # -------------------------------------------------
 
-            source = discord.FFmpegOpusAudio(
+#             source = discord.FFmpegOpusAudio(
 
-                stream_url,
+#                 stream_url,
 
-                before_options=
-                FFMPEG_BEFORE_OPTIONS,
+#                 before_options=
+#                 FFMPEG_BEFORE_OPTIONS,
 
-                options=
-                FFMPEG_OPTIONS,
+#                 options=
+#                 FFMPEG_OPTIONS,
 
-                bitrate=128
-            )
+#                 bitrate=128
+#             )
 
-            # -------------------------------------------------
-            # APPLY VOLUME
-            # -------------------------------------------------
+#             # -------------------------------------------------
+#             # APPLY VOLUME
+#             # -------------------------------------------------
 
-            source = discord.PCMVolumeTransformer(
-                source,
-                volume=player.get(
-                    "volume",
-                    DEFAULT_VOLUME
-                )
-            )
+#             source = discord.PCMVolumeTransformer(
+#                 source,
+#                 volume=player.get(
+#                     "volume",
+#                     DEFAULT_VOLUME
+#                 )
+#             )
 
-            # -------------------------------------------------
-            # CALLBACK
-            # -------------------------------------------------
+#             # -------------------------------------------------
+#             # CALLBACK
+#             # -------------------------------------------------
 
-            def playback_finished(
-                error
-            ):
+#             def playback_finished(
+#                 error
+#             ):
 
-                if error:
+#                 if error:
 
-                    print(
-                        f"⚠️ Playback error: {error}"
-                    )
+#                     print(
+#                         f"⚠️ Playback error: {error}"
+#                     )
 
-                asyncio.run_coroutine_threadsafe(
+#                 asyncio.run_coroutine_threadsafe(
 
-                    self.music_finished(
-                        guild.id
-                    ),
+#                     self.music_finished(
+#                         guild.id
+#                     ),
 
-                    self.bot.loop
-                )
+#                     self.bot.loop
+#                 )
 
-            # -------------------------------------------------
-            # PLAY
-            # -------------------------------------------------
+#             # -------------------------------------------------
+#             # PLAY
+#             # -------------------------------------------------
 
-            voice_client.play(
+#             voice_client.play(
 
-                source,
+#                 source,
 
-                after=playback_finished
-            )
+#                 after=playback_finished
+#             )
 
-            player["paused"] = False
+#             player["paused"] = False
 
-            print(
-                f"🎵 NOW PLAYING: {title}"
-            )
+#             print(
+#                 f"🎵 NOW PLAYING: {title}"
+#             )
 
-            await self.update_panel(
-                guild
-            )
+#             await self.update_panel(
+#                 guild
+#             )
 
-        except Exception as e:
+#         except Exception as e:
 
-            print(
-                f"❌ Music error:"
-                f" {type(e).__name__}: {e}"
-            )
+#             print(
+#                 f"❌ Music error:"
+#                 f" {type(e).__name__}: {e}"
+#             )
 
-            player["title"] = (
-                "Music error - reconnecting..."
-            )
+#             player["title"] = (
+#                 "Music error - reconnecting..."
+#             )
 
-            await self.update_panel(
-                guild
-            )
+#             await self.update_panel(
+#                 guild
+#             )
 
-        finally:
+#         finally:
 
-            player["starting"] = False
+#             player["starting"] = False
 
-    # =====================================================
-    # MUSIC FINISHED
-    # =====================================================
+#     # =====================================================
+#     # MUSIC FINISHED
+#     # =====================================================
 
-    async def music_finished(
-        self,
-        guild_id
-    ):
+#     async def music_finished(
+#         self,
+#         guild_id
+#     ):
 
-        await asyncio.sleep(
-            2
-        )
+#         await asyncio.sleep(
+#             2
+#         )
 
-        guild = self.bot.get_guild(
-            guild_id
-        )
+#         guild = self.bot.get_guild(
+#             guild_id
+#         )
 
-        if not guild:
+#         if not guild:
 
-            return
+#             return
 
-        player = self.players.get(
-            guild_id
-        )
+#         player = self.players.get(
+#             guild_id
+#         )
 
-        if not player:
+#         if not player:
 
-            return
+#             return
 
-        if player.get(
-            "paused",
-            False
-        ):
+#         if player.get(
+#             "paused",
+#             False
+#         ):
 
-            return
+#             return
 
-        voice_client = guild.voice_client
+#         voice_client = guild.voice_client
 
-        if not voice_client:
+#         if not voice_client:
 
-            return
+#             return
 
-        if not voice_client.is_connected():
+#         if not voice_client.is_connected():
 
-            return
+#             return
 
-        if voice_client.is_playing():
+#         if voice_client.is_playing():
 
-            return
+#             return
 
-        await self.start_music(
-            guild,
-            voice_client
-        )
+#         await self.start_music(
+#             guild,
+#             voice_client
+#         )
 
-    # =====================================================
-    # WATCHDOG
-    # =====================================================
+#     # =====================================================
+#     # WATCHDOG
+#     # =====================================================
 
-    @tasks.loop(
-        seconds=WATCHDOG_INTERVAL
-    )
-    async def music_watchdog(
-        self
-    ):
+#     @tasks.loop(
+#         seconds=WATCHDOG_INTERVAL
+#     )
+#     async def music_watchdog(
+#         self
+#     ):
 
-        for guild_id in list(
-            self.players.keys()
-        ):
+#         for guild_id in list(
+#             self.players.keys()
+#         ):
 
-            try:
+#             try:
 
-                guild = self.bot.get_guild(
-                    guild_id
-                )
+#                 guild = self.bot.get_guild(
+#                     guild_id
+#                 )
 
-                if not guild:
+#                 if not guild:
 
-                    continue
+#                     continue
 
-                player = self.players.get(
-                    guild_id
-                )
+#                 player = self.players.get(
+#                     guild_id
+#                 )
 
-                if not player:
+#                 if not player:
 
-                    continue
+#                     continue
 
-                voice_client = guild.voice_client
+#                 voice_client = guild.voice_client
 
-                # -------------------------------------------------
-                # NOT CONNECTED
-                # -------------------------------------------------
+#                 # -------------------------------------------------
+#                 # NOT CONNECTED
+#                 # -------------------------------------------------
 
-                if not voice_client:
+#                 if not voice_client:
 
-                    print(
-                        f"🔄 Watchdog reconnecting "
-                        f"{guild.name}"
-                    )
+#                     print(
+#                         f"🔄 Watchdog reconnecting "
+#                         f"{guild.name}"
+#                     )
 
-                    await self.connect_to_voice(
-                        guild
-                    )
+#                     await self.connect_to_voice(
+#                         guild
+#                     )
 
-                    continue
+#                     continue
 
-                # -------------------------------------------------
-                # DISCONNECTED
-                # -------------------------------------------------
+#                 # -------------------------------------------------
+#                 # DISCONNECTED
+#                 # -------------------------------------------------
 
-                if not voice_client.is_connected():
+#                 if not voice_client.is_connected():
 
-                    print(
-                        f"⚠️ Voice disconnected "
-                        f"in {guild.name}"
-                    )
+#                     print(
+#                         f"⚠️ Voice disconnected "
+#                         f"in {guild.name}"
+#                     )
 
-                    continue
+#                     continue
 
-                # -------------------------------------------------
-                # MUSIC STOPPED
-                # -------------------------------------------------
+#                 # -------------------------------------------------
+#                 # MUSIC STOPPED
+#                 # -------------------------------------------------
 
-                if (
-                    not voice_client.is_playing()
-                    and not voice_client.is_paused()
-                    and not player.get(
-                        "starting",
-                        False
-                    )
-                ):
+#                 if (
+#                     not voice_client.is_playing()
+#                     and not voice_client.is_paused()
+#                     and not player.get(
+#                         "starting",
+#                         False
+#                     )
+#                 ):
 
-                    print(
-                        f"🔄 Restarting music "
-                        f"in {guild.name}"
-                    )
+#                     print(
+#                         f"🔄 Restarting music "
+#                         f"in {guild.name}"
+#                     )
 
-                    await self.start_music(
-                        guild,
-                        voice_client
-                    )
+#                     await self.start_music(
+#                         guild,
+#                         voice_client
+#                     )
 
-            except Exception as e:
+#             except Exception as e:
 
-                print(
-                    f"⚠️ Watchdog error:"
-                    f" {type(e).__name__}: {e}"
-                )
+#                 print(
+#                     f"⚠️ Watchdog error:"
+#                     f" {type(e).__name__}: {e}"
+#                 )
 
-    # =====================================================
-    # WATCHDOG BEFORE LOOP
-    # =====================================================
+#     # =====================================================
+#     # WATCHDOG BEFORE LOOP
+#     # =====================================================
 
-    @music_watchdog.before_loop
-    async def before_watchdog(
-        self
-    ):
+#     @music_watchdog.before_loop
+#     async def before_watchdog(
+#         self
+#     ):
 
-        await self.bot.wait_until_ready()
+#         await self.bot.wait_until_ready()
 
-        print(
-            "🎵 Music watchdog started."
-        )
+#         print(
+#             "🎵 Music watchdog started."
+#         )
 
-        await asyncio.sleep(
-            5
-        )
+#         await asyncio.sleep(
+#             5
+#         )
 
-        await self.restore_music()
+#         await self.restore_music()
 
-    # =====================================================
-    # RESTORE AFTER RESTART
-    # =====================================================
+#     # =====================================================
+#     # RESTORE AFTER RESTART
+#     # =====================================================
 
-    async def restore_music(
-        self
-    ):
+#     async def restore_music(
+#         self
+#     ):
 
-        if not self.config:
+#         if not self.config:
 
-            print(
-                "ℹ️ No saved music systems."
-            )
+#             print(
+#                 "ℹ️ No saved music systems."
+#             )
 
-            return
+#             return
 
-        print(
-            "🔄 Restoring music systems..."
-        )
+#         print(
+#             "🔄 Restoring music systems..."
+#         )
 
-        for guild_id, config in list(
-            self.config.items()
-        ):
+#         for guild_id, config in list(
+#             self.config.items()
+#         ):
 
-            try:
+#             try:
 
-                guild = self.bot.get_guild(
-                    int(guild_id)
-                )
+#                 guild = self.bot.get_guild(
+#                     int(guild_id)
+#                 )
 
-                if not guild:
+#                 if not guild:
 
-                    continue
+#                     continue
 
-                voice = guild.get_channel(
-                    config.get(
-                        "voice_channel_id"
-                    )
-                )
+#                 voice = guild.get_channel(
+#                     config.get(
+#                         "voice_channel_id"
+#                     )
+#                 )
 
-                text = guild.get_channel(
-                    config.get(
-                        "text_channel_id"
-                    )
-                )
+#                 text = guild.get_channel(
+#                     config.get(
+#                         "text_channel_id"
+#                     )
+#                 )
 
-                if not voice or not text:
+#                 if not voice or not text:
 
-                    print(
-                        f"⚠️ Music channels missing "
-                        f"in {guild.name}"
-                    )
+#                     print(
+#                         f"⚠️ Music channels missing "
+#                         f"in {guild.name}"
+#                     )
 
-                    continue
+#                     continue
 
-                self.players[
-                    guild.id
-                ] = {
+#                 self.players[
+#                     guild.id
+#                 ] = {
 
-                    "voice_channel_id":
-                        voice.id,
+#                     "voice_channel_id":
+#                         voice.id,
 
-                    "text_channel_id":
-                        text.id,
+#                     "text_channel_id":
+#                         text.id,
 
-                    "message_id":
-                        None,
+#                     "message_id":
+#                         None,
 
-                    "volume":
-                        DEFAULT_VOLUME,
+#                     "volume":
+#                         DEFAULT_VOLUME,
 
-                    "paused":
-                        False,
+#                     "paused":
+#                         False,
 
-                    "starting":
-                        False,
+#                     "starting":
+#                         False,
 
-                    "title":
-                        "Reconnecting...",
+#                     "title":
+#                         "Reconnecting...",
 
-                    "url":
-                        MUSIC_SOURCE
-                }
+#                     "url":
+#                         MUSIC_SOURCE
+#                 }
 
-                # -------------------------------------------------
-                # FIND PANEL
-                # -------------------------------------------------
+#                 # -------------------------------------------------
+#                 # FIND PANEL
+#                 # -------------------------------------------------
 
-                try:
+#                 try:
 
-                    async for message in text.history(
-                        limit=30
-                    ):
+#                     async for message in text.history(
+#                         limit=30
+#                     ):
 
-                        if (
-                            message.author.id
-                            == self.bot.user.id
-                            and message.embeds
-                        ):
+#                         if (
+#                             message.author.id
+#                             == self.bot.user.id
+#                             and message.embeds
+#                         ):
 
-                            self.players[
-                                guild.id
-                            ]["message_id"] = message.id
+#                             self.players[
+#                                 guild.id
+#                             ]["message_id"] = message.id
 
-                            break
+#                             break
 
-                except:
-                    pass
+#                 except:
+#                     pass
 
-                print(
-                    f"🔄 Restoring music "
-                    f"for {guild.name}"
-                )
+#                 print(
+#                     f"🔄 Restoring music "
+#                     f"for {guild.name}"
+#                 )
 
-                await self.connect_to_voice(
-                    guild
-                )
+#                 await self.connect_to_voice(
+#                     guild
+#                 )
 
-            except Exception as e:
+#             except Exception as e:
 
-                print(
-                    f"❌ Restore error:"
-                    f" {type(e).__name__}: {e}"
-                )
+#                 print(
+#                     f"❌ Restore error:"
+#                     f" {type(e).__name__}: {e}"
+#                 )
 
-    # =====================================================
-    # PLAYER EMBED
-    # =====================================================
+#     # =====================================================
+#     # PLAYER EMBED
+#     # =====================================================
 
-    def player_embed(
-        self,
-        guild
-    ):
+#     def player_embed(
+#         self,
+#         guild
+#     ):
 
-        player = self.players.get(
-            guild.id,
-            {}
-        )
+#         player = self.players.get(
+#             guild.id,
+#             {}
+#         )
 
-        title = player.get(
-            "title",
-            "Malayalam Music"
-        )
+#         title = player.get(
+#             "title",
+#             "Malayalam Music"
+#         )
 
-        volume = int(
-            player.get(
-                "volume",
-                DEFAULT_VOLUME
-            ) * 100
-        )
+#         volume = int(
+#             player.get(
+#                 "volume",
+#                 DEFAULT_VOLUME
+#             ) * 100
+#         )
 
-        voice_client = guild.voice_client
+#         voice_client = guild.voice_client
 
-        if player.get(
-            "paused",
-            False
-        ):
+#         if player.get(
+#             "paused",
+#             False
+#         ):
 
-            status = "⏸️ Paused"
+#             status = "⏸️ Paused"
 
-        elif (
-            voice_client
-            and voice_client.is_connected()
-            and voice_client.is_playing()
-        ):
+#         elif (
+#             voice_client
+#             and voice_client.is_connected()
+#             and voice_client.is_playing()
+#         ):
 
-            status = "🟢 Playing"
+#             status = "🟢 Playing"
 
-        elif (
-            voice_client
-            and voice_client.is_connected()
-        ):
+#         elif (
+#             voice_client
+#             and voice_client.is_connected()
+#         ):
 
-            status = "🟡 Connected"
+#             status = "🟡 Connected"
 
-        else:
+#         else:
 
-            status = "🔴 Connecting..."
+#             status = "🔴 Connecting..."
 
-        embed = discord.Embed(
+#         embed = discord.Embed(
 
-            title="🎵 MALAYALAM MUSIC",
+#             title="🎵 MALAYALAM MUSIC",
 
-            description=(
+#             description=(
 
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
+#                 "━━━━━━━━━━━━━━━━━━━━\n\n"
 
-                "🎶 **NOW PLAYING**\n\n"
+#                 "🎶 **NOW PLAYING**\n\n"
 
-                f"**{title}**\n\n"
+#                 f"**{title}**\n\n"
 
-                f"📻 **24/7 Malayalam Music**\n"
-                f"🔊 **Volume:** `{volume}%`\n"
-                f"📡 **Status:** {status}\n\n"
+#                 f"📻 **24/7 Malayalam Music**\n"
+#                 f"🔊 **Volume:** `{volume}%`\n"
+#                 f"📡 **Status:** {status}\n\n"
 
-                "⏸️ Pause when you want.\n"
-                "▶️ Resume anytime.\n"
-                "🔊 Control the volume.\n\n"
+#                 "⏸️ Pause when you want.\n"
+#                 "▶️ Resume anytime.\n"
+#                 "🔊 Control the volume.\n\n"
 
-                "━━━━━━━━━━━━━━━━━━━━"
-            ),
+#                 "━━━━━━━━━━━━━━━━━━━━"
+#             ),
 
-            color=discord.Color.blurple()
-        )
+#             color=discord.Color.blurple()
+#         )
 
-        if guild.icon:
+#         if guild.icon:
 
-            embed.set_thumbnail(
-                url=guild.icon.url
-            )
+#             embed.set_thumbnail(
+#                 url=guild.icon.url
+#             )
 
-        embed.set_footer(
+#         embed.set_footer(
 
-            text=(
-                f"{guild.name} • "
-                "24/7 Music"
-            ),
+#             text=(
+#                 f"{guild.name} • "
+#                 "24/7 Music"
+#             ),
 
-            icon_url=(
-                guild.icon.url
-                if guild.icon
-                else None
-            )
-        )
+#             icon_url=(
+#                 guild.icon.url
+#                 if guild.icon
+#                 else None
+#             )
+#         )
 
-        return embed
+#         return embed
 
-    # =====================================================
-    # SEND PANEL
-    # =====================================================
+#     # =====================================================
+#     # SEND PANEL
+#     # =====================================================
 
-    async def send_panel(
-        self,
-        guild
-    ):
+#     async def send_panel(
+#         self,
+#         guild
+#     ):
 
-        player = self.players.get(
-            guild.id
-        )
+#         player = self.players.get(
+#             guild.id
+#         )
 
-        if not player:
+#         if not player:
 
-            return None
+#             return None
 
-        channel = guild.get_channel(
-            player[
-                "text_channel_id"
-            ]
-        )
+#         channel = guild.get_channel(
+#             player[
+#                 "text_channel_id"
+#             ]
+#         )
 
-        if not channel:
+#         if not channel:
 
-            return None
+#             return None
 
-        try:
+#         try:
 
-            return await channel.send(
+#             return await channel.send(
 
-                embed=self.player_embed(
-                    guild
-                ),
+#                 embed=self.player_embed(
+#                     guild
+#                 ),
 
-                view=MusicControlView(
-                    self.bot
-                )
-            )
+#                 view=MusicControlView(
+#                     self.bot
+#                 )
+#             )
 
-        except Exception as e:
+#         except Exception as e:
 
-            print(
-                f"❌ Panel error: {e}"
-            )
+#             print(
+#                 f"❌ Panel error: {e}"
+#             )
 
-            return None
+#             return None
 
-    # =====================================================
-    # UPDATE PANEL
-    # =====================================================
+#     # =====================================================
+#     # UPDATE PANEL
+#     # =====================================================
 
-    async def update_panel(
-        self,
-        guild
-    ):
+#     async def update_panel(
+#         self,
+#         guild
+#     ):
 
-        player = self.players.get(
-            guild.id
-        )
+#         player = self.players.get(
+#             guild.id
+#         )
 
-        if not player:
+#         if not player:
 
-            return
+#             return
 
-        channel = guild.get_channel(
-            player[
-                "text_channel_id"
-            ]
-        )
+#         channel = guild.get_channel(
+#             player[
+#                 "text_channel_id"
+#             ]
+#         )
 
-        if not channel:
+#         if not channel:
 
-            return
+#             return
 
-        message_id = player.get(
-            "message_id"
-        )
+#         message_id = player.get(
+#             "message_id"
+#         )
 
-        # -------------------------------------------------
-        # EDIT EXISTING
-        # -------------------------------------------------
+#         # -------------------------------------------------
+#         # EDIT EXISTING
+#         # -------------------------------------------------
 
-        if message_id:
+#         if message_id:
 
-            try:
+#             try:
 
-                message = await channel.fetch_message(
-                    message_id
-                )
+#                 message = await channel.fetch_message(
+#                     message_id
+#                 )
 
-                await message.edit(
+#                 await message.edit(
 
-                    embed=self.player_embed(
-                        guild
-                    ),
+#                     embed=self.player_embed(
+#                         guild
+#                     ),
 
-                    view=MusicControlView(
-                        self.bot
-                    )
-                )
+#                     view=MusicControlView(
+#                         self.bot
+#                     )
+#                 )
 
-                return
+#                 return
 
-            except:
-                pass
+#             except:
+#                 pass
 
-        # -------------------------------------------------
-        # CREATE NEW
-        # -------------------------------------------------
+#         # -------------------------------------------------
+#         # CREATE NEW
+#         # -------------------------------------------------
 
-        message = await self.send_panel(
-            guild
-        )
+#         message = await self.send_panel(
+#             guild
+#         )
 
-        if message:
+#         if message:
 
-            player[
-                "message_id"
-            ] = message.id
+#             player[
+#                 "message_id"
+#             ] = message.id
 
-    # =====================================================
-    # CHANGE VOLUME
-    # =====================================================
+#     # =====================================================
+#     # CHANGE VOLUME
+#     # =====================================================
 
-    async def change_volume(
-        self,
-        interaction,
-        amount
-    ):
+#     async def change_volume(
+#         self,
+#         interaction,
+#         amount
+#     ):
 
-        guild = interaction.guild
+#         guild = interaction.guild
 
-        player = self.players.get(
-            guild.id
-        )
+#         player = self.players.get(
+#             guild.id
+#         )
 
-        if not player:
+#         if not player:
 
-            await interaction.response.send_message(
-                "❌ Music system is not configured.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "❌ Music system is not configured.",
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        volume = player.get(
-            "volume",
-            DEFAULT_VOLUME
-        )
+#         volume = player.get(
+#             "volume",
+#             DEFAULT_VOLUME
+#         )
 
-        volume = max(
-            0.0,
-            min(
-                1.0,
-                volume + amount
-            )
-        )
+#         volume = max(
+#             0.0,
+#             min(
+#                 1.0,
+#                 volume + amount
+#             )
+#         )
 
-        player["volume"] = volume
+#         player["volume"] = volume
 
-        voice_client = guild.voice_client
+#         voice_client = guild.voice_client
 
-        if (
-            voice_client
-            and voice_client.source
-            and isinstance(
-                voice_client.source,
-                discord.PCMVolumeTransformer
-            )
-        ):
+#         if (
+#             voice_client
+#             and voice_client.source
+#             and isinstance(
+#                 voice_client.source,
+#                 discord.PCMVolumeTransformer
+#             )
+#         ):
 
-            voice_client.source.volume = volume
+#             voice_client.source.volume = volume
 
-        await interaction.response.send_message(
+#         await interaction.response.send_message(
 
-            f"🔊 Volume: "
-            f"**{int(volume * 100)}%**",
+#             f"🔊 Volume: "
+#             f"**{int(volume * 100)}%**",
 
-            ephemeral=True
-        )
+#             ephemeral=True
+#         )
 
-        await self.update_panel(
-            guild
-        )
+#         await self.update_panel(
+#             guild
+#         )
 
-    # =====================================================
-    # PAUSE
-    # =====================================================
+#     # =====================================================
+#     # PAUSE
+#     # =====================================================
 
-    async def pause_music(
-        self,
-        interaction
-    ):
+#     async def pause_music(
+#         self,
+#         interaction
+#     ):
 
-        guild = interaction.guild
+#         guild = interaction.guild
 
-        voice_client = guild.voice_client
+#         voice_client = guild.voice_client
 
-        if not voice_client:
+#         if not voice_client:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "❌ Bot is not connected to voice.",
+#                 "❌ Bot is not connected to voice.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        if voice_client.is_playing():
+#         if voice_client.is_playing():
 
-            voice_client.pause()
+#             voice_client.pause()
 
-            self.players[
-                guild.id
-            ]["paused"] = True
+#             self.players[
+#                 guild.id
+#             ]["paused"] = True
 
-            await interaction.response.send_message(
-                "⏸️ Music paused.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "⏸️ Music paused.",
+#                 ephemeral=True
+#             )
 
-        else:
+#         else:
 
-            await interaction.response.send_message(
-                "⚠️ Music is not playing.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "⚠️ Music is not playing.",
+#                 ephemeral=True
+#             )
 
-        await self.update_panel(
-            guild
-        )
+#         await self.update_panel(
+#             guild
+#         )
 
-    # =====================================================
-    # RESUME
-    # =====================================================
+#     # =====================================================
+#     # RESUME
+#     # =====================================================
 
-    async def resume_music(
-        self,
-        interaction
-    ):
+#     async def resume_music(
+#         self,
+#         interaction
+#     ):
 
-        guild = interaction.guild
+#         guild = interaction.guild
 
-        voice_client = guild.voice_client
+#         voice_client = guild.voice_client
 
-        if not voice_client:
+#         if not voice_client:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "🔄 Reconnecting to voice...",
+#                 "🔄 Reconnecting to voice...",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            connected = await self.connect_to_voice(
-                guild
-            )
+#             connected = await self.connect_to_voice(
+#                 guild
+#             )
 
-            if not connected:
+#             if not connected:
 
-                await interaction.edit_original_response(
+#                 await interaction.edit_original_response(
 
-                    content=(
-                        "❌ Could not connect to voice."
-                    )
-                )
+#                     content=(
+#                         "❌ Could not connect to voice."
+#                     )
+#                 )
 
-                return
+#                 return
 
-            voice_client = guild.voice_client
+#             voice_client = guild.voice_client
 
-        if voice_client.is_paused():
+#         if voice_client.is_paused():
 
-            voice_client.resume()
+#             voice_client.resume()
 
-            self.players[
-                guild.id
-            ]["paused"] = False
+#             self.players[
+#                 guild.id
+#             ]["paused"] = False
 
-            await interaction.response.send_message(
-                "▶️ Music resumed.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "▶️ Music resumed.",
+#                 ephemeral=True
+#             )
 
-        elif voice_client.is_playing():
+#         elif voice_client.is_playing():
 
-            await interaction.response.send_message(
-                "▶️ Music is already playing.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "▶️ Music is already playing.",
+#                 ephemeral=True
+#             )
 
-        else:
+#         else:
 
-            self.players[
-                guild.id
-            ]["paused"] = False
+#             self.players[
+#                 guild.id
+#             ]["paused"] = False
 
-            await self.start_music(
-                guild,
-                voice_client
-            )
+#             await self.start_music(
+#                 guild,
+#                 voice_client
+#             )
 
-            await interaction.response.send_message(
-                "▶️ Music started.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "▶️ Music started.",
+#                 ephemeral=True
+#             )
 
-        await self.update_panel(
-            guild
-        )
+#         await self.update_panel(
+#             guild
+#         )
 
-    # =====================================================
-    # REFRESH
-    # =====================================================
+#     # =====================================================
+#     # REFRESH
+#     # =====================================================
 
-    async def refresh_music(
-        self,
-        interaction
-    ):
+#     async def refresh_music(
+#         self,
+#         interaction
+#     ):
 
-        guild = interaction.guild
+#         guild = interaction.guild
 
-        voice_client = guild.voice_client
+#         voice_client = guild.voice_client
 
-        if not voice_client:
+#         if not voice_client:
 
-            connected = await self.connect_to_voice(
-                guild
-            )
+#             connected = await self.connect_to_voice(
+#                 guild
+#             )
 
-            if not connected:
+#             if not connected:
 
-                await interaction.response.send_message(
-                    "❌ Could not connect to voice.",
-                    ephemeral=True
-                )
+#                 await interaction.response.send_message(
+#                     "❌ Could not connect to voice.",
+#                     ephemeral=True
+#                 )
 
-                return
+#                 return
 
-            voice_client = guild.voice_client
+#             voice_client = guild.voice_client
 
-        try:
+#         try:
 
-            if voice_client.is_playing():
+#             if voice_client.is_playing():
 
-                voice_client.stop()
+#                 voice_client.stop()
 
-        except:
-            pass
+#         except:
+#             pass
 
-        self.players[
-            guild.id
-        ]["paused"] = False
+#         self.players[
+#             guild.id
+#         ]["paused"] = False
 
-        await asyncio.sleep(
-            1
-        )
+#         await asyncio.sleep(
+#             1
+#         )
 
-        await self.start_music(
-            guild,
-            voice_client
-        )
+#         await self.start_music(
+#             guild,
+#             voice_client
+#         )
 
-        await interaction.response.send_message(
-            "🔄 Music refreshed.",
-            ephemeral=True
-        )
+#         await interaction.response.send_message(
+#             "🔄 Music refreshed.",
+#             ephemeral=True
+#         )
 
 
-# =========================================================
-# MUSIC CONTROL VIEW
-# =========================================================
+# # =========================================================
+# # MUSIC CONTROL VIEW
+# # =========================================================
 
-class MusicControlView(
-    discord.ui.View
-):
+# class MusicControlView(
+#     discord.ui.View
+# ):
 
-    def __init__(
-        self,
-        bot
-    ):
+#     def __init__(
+#         self,
+#         bot
+#     ):
 
-        super().__init__(
-            timeout=None
-        )
+#         super().__init__(
+#             timeout=None
+#         )
 
-        self.bot = bot
+#         self.bot = bot
 
-    # =====================================================
-    # GET COG
-    # =====================================================
+#     # =====================================================
+#     # GET COG
+#     # =====================================================
 
-    def get_cog(self):
+#     def get_cog(self):
 
-        return self.bot.get_cog(
-            "MusicSystem"
-        )
+#         return self.bot.get_cog(
+#             "MusicSystem"
+#         )
 
-    # =====================================================
-    # VOLUME DOWN
-    # =====================================================
+#     # =====================================================
+#     # VOLUME DOWN
+#     # =====================================================
 
-    @discord.ui.button(
-        label="Volume -",
-        emoji="🔉",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music_volume_down"
-    )
-    async def volume_down(
-        self,
-        interaction,
-        button
-    ):
+#     @discord.ui.button(
+#         label="Volume -",
+#         emoji="🔉",
+#         style=discord.ButtonStyle.secondary,
+#         custom_id="music_volume_down"
+#     )
+#     async def volume_down(
+#         self,
+#         interaction,
+#         button
+#     ):
 
-        cog = self.get_cog()
+#         cog = self.get_cog()
 
-        if not cog:
+#         if not cog:
 
-            await interaction.response.send_message(
-                "❌ Music system is loading.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "❌ Music system is loading.",
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        await cog.change_volume(
-            interaction,
-            -0.10
-        )
+#         await cog.change_volume(
+#             interaction,
+#             -0.10
+#         )
 
-    # =====================================================
-    # VOLUME UP
-    # =====================================================
+#     # =====================================================
+#     # VOLUME UP
+#     # =====================================================
 
-    @discord.ui.button(
-        label="Volume +",
-        emoji="🔊",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music_volume_up"
-    )
-    async def volume_up(
-        self,
-        interaction,
-        button
-    ):
+#     @discord.ui.button(
+#         label="Volume +",
+#         emoji="🔊",
+#         style=discord.ButtonStyle.secondary,
+#         custom_id="music_volume_up"
+#     )
+#     async def volume_up(
+#         self,
+#         interaction,
+#         button
+#     ):
 
-        cog = self.get_cog()
+#         cog = self.get_cog()
 
-        if not cog:
+#         if not cog:
 
-            await interaction.response.send_message(
-                "❌ Music system is loading.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "❌ Music system is loading.",
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        await cog.change_volume(
-            interaction,
-            0.10
-        )
+#         await cog.change_volume(
+#             interaction,
+#             0.10
+#         )
 
-    # =====================================================
-    # PAUSE
-    # =====================================================
+#     # =====================================================
+#     # PAUSE
+#     # =====================================================
 
-    @discord.ui.button(
-        label="Pause",
-        emoji="⏸️",
-        style=discord.ButtonStyle.primary,
-        custom_id="music_pause"
-    )
-    async def pause(
-        self,
-        interaction,
-        button
-    ):
+#     @discord.ui.button(
+#         label="Pause",
+#         emoji="⏸️",
+#         style=discord.ButtonStyle.primary,
+#         custom_id="music_pause"
+#     )
+#     async def pause(
+#         self,
+#         interaction,
+#         button
+#     ):
 
-        cog = self.get_cog()
+#         cog = self.get_cog()
 
-        if not cog:
+#         if not cog:
 
-            await interaction.response.send_message(
-                "❌ Music system is loading.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "❌ Music system is loading.",
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        await cog.pause_music(
-            interaction
-        )
+#         await cog.pause_music(
+#             interaction
+#         )
 
-    # =====================================================
-    # RESUME
-    # =====================================================
+#     # =====================================================
+#     # RESUME
+#     # =====================================================
 
-    @discord.ui.button(
-        label="Resume",
-        emoji="▶️",
-        style=discord.ButtonStyle.success,
-        custom_id="music_resume"
-    )
-    async def resume(
-        self,
-        interaction,
-        button
-    ):
+#     @discord.ui.button(
+#         label="Resume",
+#         emoji="▶️",
+#         style=discord.ButtonStyle.success,
+#         custom_id="music_resume"
+#     )
+#     async def resume(
+#         self,
+#         interaction,
+#         button
+#     ):
 
-        cog = self.get_cog()
+#         cog = self.get_cog()
 
-        if not cog:
+#         if not cog:
 
-            await interaction.response.send_message(
-                "❌ Music system is loading.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "❌ Music system is loading.",
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        await cog.resume_music(
-            interaction
-        )
+#         await cog.resume_music(
+#             interaction
+#         )
 
-    # =====================================================
-    # REFRESH
-    # =====================================================
+#     # =====================================================
+#     # REFRESH
+#     # =====================================================
 
-    @discord.ui.button(
-        label="Refresh",
-        emoji="🔄",
-        style=discord.ButtonStyle.primary,
-        custom_id="music_refresh"
-    )
-    async def refresh(
-        self,
-        interaction,
-        button
-    ):
+#     @discord.ui.button(
+#         label="Refresh",
+#         emoji="🔄",
+#         style=discord.ButtonStyle.primary,
+#         custom_id="music_refresh"
+#     )
+#     async def refresh(
+#         self,
+#         interaction,
+#         button
+#     ):
 
-        cog = self.get_cog()
+#         cog = self.get_cog()
 
-        if not cog:
+#         if not cog:
 
-            await interaction.response.send_message(
-                "❌ Music system is loading.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "❌ Music system is loading.",
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        await cog.refresh_music(
-            interaction
-        )
+#         await cog.refresh_music(
+#             interaction
+#         )
 
 
-# =========================================================
-# SETUP
-# =========================================================
+# # =========================================================
+# # SETUP
+# # =========================================================
 
-async def setup(
-    bot
-):
+# async def setup(
+#     bot
+# ):
 
-    # Persistent buttons
-    bot.add_view(
-        MusicControlView(
-            bot
-        )
-    )
+#     # Persistent buttons
+#     bot.add_view(
+#         MusicControlView(
+#             bot
+#         )
+#     )
 
-    await bot.add_cog(
-        MusicSystem(
-            bot
-        )
-    )
+#     await bot.add_cog(
+#         MusicSystem(
+#             bot
+#         )
+#     )
