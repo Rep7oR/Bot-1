@@ -138,58 +138,122 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 
     
-# ---------- LOAD COGS ----------
+# ============================================================
+# LOAD COGS
+# ============================================================
+
 async def load_cogs():
-    """Load all cogs from the cogs folder"""
 
     cogs_folder = "./cogs"
 
-    if not os.path.exists(cogs_folder):
-        os.makedirs(cogs_folder)
+    if not os.path.exists(
+        cogs_folder
+    ):
 
-    # ---------------------------------------------------------
+        os.makedirs(
+            cogs_folder
+        )
+
+    files = [
+
+        filename
+
+        for filename in os.listdir(
+            cogs_folder
+        )
+
+        if (
+            filename.endswith(".py")
+            and
+            not filename.startswith("_")
+        )
+    ]
+
+    # ========================================================
     # MASTER CONFIG MUST LOAD FIRST
-    # ---------------------------------------------------------
-    # It restores saved configuration before the other
-    # cogs attempt to read their JSON configuration files.
-    # ---------------------------------------------------------
+    # ========================================================
 
-    master_cog = "cogs.masterconfig"
+    master_cog = None
 
-    try:
-        await bot.load_extension(master_cog)
-        print("✅ Loaded master configuration system")
+    for filename in files:
 
-    except Exception as e:
-        print(f"❌ Failed to load masterconfig.py: {e}")
+        if filename.lower() in {
+            "masterconfig.py",
+            "master_config.py",
+        }:
 
-    # ---------------------------------------------------------
-    # LOAD ALL OTHER COGS
-    # ---------------------------------------------------------
+            master_cog = filename
 
-    for filename in sorted(os.listdir(cogs_folder)):
+            break
 
-        if not filename.endswith(".py"):
-            continue
+    # --------------------------------------------------------
+    # Remove Master Config from normal list
+    # --------------------------------------------------------
 
-        if filename.startswith("_"):
-            continue
+    if master_cog:
 
-        # masterconfig.py was already loaded above
-        if filename.lower() == "masterconfig.py":
-            continue
+        files.remove(
+            master_cog
+        )
 
-        extension = f"cogs.{filename[:-3]}"
+        extension = (
+            f"cogs.{master_cog[:-3]}"
+        )
 
         try:
-            await bot.load_extension(extension)
 
-            print(f"✅ Loaded cog: {filename}")
+            await bot.load_extension(
+                extension
+            )
+
+            print(
+                f"🧠 Loaded FIRST: "
+                f"{master_cog}"
+            )
 
         except Exception as e:
 
             print(
-                f"❌ Failed to load {filename}: {e}"
+                f"❌ Failed to load "
+                f"{master_cog}: {e}"
+            )
+
+            raise
+
+    else:
+
+        print(
+            "⚠️ WARNING: "
+            "masterconfig.py was not found!"
+        )
+
+    # ========================================================
+    # LOAD EVERYTHING ELSE
+    # ========================================================
+
+    for filename in sorted(
+        files
+    ):
+
+        extension = (
+            f"cogs.{filename[:-3]}"
+        )
+
+        try:
+
+            await bot.load_extension(
+                extension
+            )
+
+            print(
+                f"✅ Loaded cog: {filename}"
+            )
+
+        except Exception as e:
+
+            print(
+                f"❌ Failed to load "
+                f"{filename}: {e}"
             )
 
 
