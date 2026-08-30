@@ -42,12 +42,44 @@ def load_json(filename):
             encoding="utf-8"
         ) as f:
 
-            return json.load(f)
+            data = json.load(f)
+
+        # Normal JSON object
+        if isinstance(data, dict):
+            return data
+
+        # Handle JSON that was accidentally saved
+        # as a string containing another JSON object
+        if isinstance(data, str):
+
+            try:
+
+                nested_data = json.loads(data)
+
+                if isinstance(nested_data, dict):
+                    return nested_data
+
+            except json.JSONDecodeError:
+                pass
+
+        # Config/tickets must always be dictionaries
+        print(
+            f"⚠️ {filename} does not contain "
+            f"a valid JSON object. Using empty data."
+        )
+
+        return {}
 
     except (
         json.JSONDecodeError,
-        FileNotFoundError
+        FileNotFoundError,
+        TypeError
     ):
+
+        print(
+            f"⚠️ Could not load {filename}. "
+            f"Using empty data."
+        )
 
         return {}
 
