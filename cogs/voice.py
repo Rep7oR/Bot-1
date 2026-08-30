@@ -4,7 +4,6 @@ from discord import app_commands
 
 import json
 import os
-import asyncio
 
 
 # =========================================================
@@ -35,67 +34,9 @@ def load_config():
             "r",
             encoding="utf-8"
         ) as f:
-            data = json.load(f)
-
-        # The Supabase restore may contain a JSON string if an
-        # older version saved the JSON twice. Unwrap it safely.
-        for _ in range(3):
-            if not isinstance(data, str):
-                break
-
-            try:
-                data = json.loads(data)
-            except (json.JSONDecodeError, TypeError):
-                break
-
-        if not isinstance(data, dict):
-            print(
-                f"⚠️ {CONFIG_FILE} has an invalid root type: "
-                f"{type(data).__name__}. Using empty config."
-            )
-            return {}
-
-        # Normalize per-guild values in case an old database entry
-        # contains the guild configuration as a JSON string.
-        normalized = {}
-
-        for guild_id, guild_config in data.items():
-
-            if isinstance(guild_config, str):
-
-                try:
-                    guild_config = json.loads(guild_config)
-                except (json.JSONDecodeError, TypeError):
-                    print(
-                        f"⚠️ Invalid voice config for guild "
-                        f"{guild_id}. Skipping."
-                    )
-                    continue
-
-            if not isinstance(guild_config, dict):
-                print(
-                    f"⚠️ Invalid voice config for guild "
-                    f"{guild_id}: "
-                    f"{type(guild_config).__name__}"
-                )
-                continue
-
-            normalized[str(guild_id)] = guild_config
-
-        print(
-            f"🎧 Voice configuration loaded: "
-            f"{len(normalized)} guild(s)"
-        )
-
-        return normalized
+            return json.load(f)
 
     except (json.JSONDecodeError, FileNotFoundError):
-        return {}
-
-    except Exception as e:
-        print(
-            f"❌ Voice config load failed: {e}"
-        )
         return {}
 
 
@@ -136,157 +77,6 @@ class VoiceSystem(commands.Cog):
 
         self.temp_channels = {}
 
-        # Load local/restored configuration immediately without
-        # waiting for Discord READY.
-        self._load_config_at_startup()
-
-    # =====================================================
-    # CONFIGURATION NORMALIZATION
-    # =====================================================
-
-    def reload_config(self):
-
-        self.config = load_config()
-
-        return self.config
-
-    async def restore_discord(self):
-
-        """
-        Reload the configuration after MasterConfig restores
-        voice_config.json from Supabase.
-
-        This method does not create duplicate channels. It only
-        reloads the restored configuration and verifies that the
-        configured Discord objects still exist.
-        """
-
-        self.reload_config()
-
-        if not self.config:
-
-            print(
-                "🎧 VoiceSystem: no saved guild configuration found."
-            )
-
-            return
-
-        print(
-            f"♻️ VoiceSystem: restored configuration for "
-            f"{len(self.config)} guild(s)"
-        )
-
-        for guild_id, guild_config in self.config.items():
-
-            try:
-                guild_id_int = int(guild_id)
-            except (TypeError, ValueError):
-
-                print(
-                    f"⚠️ VoiceSystem: invalid guild ID: {guild_id}"
-                )
-
-                continue
-
-            guild = self.bot.get_guild(guild_id_int)
-
-            if guild is None:
-
-                print(
-                    f"⚠️ VoiceSystem: guild {guild_id} "
-                    f"is not available to the bot."
-                )
-
-                continue
-
-            if not isinstance(guild_config, dict):
-
-                print(
-                    f"⚠️ VoiceSystem: invalid configuration "
-                    f"for {guild.name}"
-                )
-
-                continue
-
-            join_channel_id = guild_config.get(
-                "join_channel_id"
-            )
-
-            category_id = guild_config.get(
-                "category_id"
-            )
-
-            try:
-                join_channel_id = int(join_channel_id)
-                category_id = int(category_id)
-            except (TypeError, ValueError):
-
-                print(
-                    f"⚠️ VoiceSystem: invalid channel/category "
-                    f"IDs for {guild.name}"
-                )
-
-                continue
-
-            join_channel = guild.get_channel(
-                join_channel_id
-            )
-
-            category = guild.get_channel(
-                category_id
-            )
-
-            if join_channel is None:
-
-                print(
-                    f"⚠️ VoiceSystem: Join channel missing "
-                    f"in {guild.name} "
-                    f"(ID: {join_channel_id})"
-                )
-
-            else:
-
-                print(
-                    f"✅ VoiceSystem: Join channel restored "
-                    f"for {guild.name}: "
-                    f"{join_channel.name}"
-                )
-
-            if category is None:
-
-                print(
-                    f"⚠️ VoiceSystem: Category missing "
-                    f"in {guild.name} "
-                    f"(ID: {category_id})"
-                )
-
-            else:
-
-                print(
-                    f"✅ VoiceSystem: Category restored "
-                    f"for {guild.name}: "
-                    f"{category.name}"
-                )
-
-        print(
-            "🎧 VoiceSystem: Discord configuration check complete."
-        )
-
-    # =====================================================
-    # COG LOAD
-    # =====================================================
-
-    def _load_config_at_startup(self):
-
-        # This must remain non-blocking. setup_hook() runs before
-        # Discord reaches READY, so waiting for wait_until_ready()
-        # here would prevent the bot from finishing startup.
-        self.reload_config()
-
-        print(
-            "🎧 VoiceSystem configuration loaded."
-        )
-
     # =====================================================
     # /SETUPVOICE
     # =====================================================
@@ -325,16 +115,13 @@ class VoiceSystem(commands.Cog):
         # -------------------------------------------------
 
         self.config[str(guild.id)] = {
-            "category_id": int(category.id),
-            "join_channel_id": int(join_channel.id)
+            "category_id": category.id,
+            "join_channel_id": join_channel.id
         }
 
         save_config(
             self.config
         )
-
-        # Keep the in-memory structure guaranteed to be a dict.
-        self.reload_config()
 
         # -------------------------------------------------
         # CONFIRMATION
@@ -400,22 +187,7 @@ class VoiceSystem(commands.Cog):
             str(guild.id)
         )
 
-        # Defensive compatibility for old configurations that may have
-        # been restored as JSON strings.
-        if isinstance(guild_config, str):
-
-            try:
-                guild_config = json.loads(guild_config)
-            except (json.JSONDecodeError, TypeError):
-
-                print(
-                    f"⚠️ Invalid voice configuration for "
-                    f"{guild.name}."
-                )
-
-                return
-
-        if not isinstance(guild_config, dict):
+        if not guild_config:
             return
 
         join_channel_id = guild_config.get(
@@ -425,18 +197,6 @@ class VoiceSystem(commands.Cog):
         category_id = guild_config.get(
             "category_id"
         )
-
-        try:
-            join_channel_id = int(join_channel_id)
-            category_id = int(category_id)
-        except (TypeError, ValueError):
-
-            print(
-                f"⚠️ Invalid voice channel/category IDs "
-                f"for {guild.name}."
-            )
-
-            return
 
         # =================================================
         # 1. JOIN-TO-CREATE
