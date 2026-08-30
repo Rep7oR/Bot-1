@@ -143,82 +143,135 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ============================================================
 
 async def load_cogs():
-    """
-    Load all normal cogs during setup_hook.
-
-    MasterConfig is intentionally NOT loaded here because its database
-    connection/restore work can block Discord's setup_hook. It is loaded
-    after Discord reaches on_ready().
-    """
 
     cogs_folder = "./cogs"
 
-    if not os.path.exists(cogs_folder):
-        os.makedirs(cogs_folder)
+    if not os.path.exists(
+        cogs_folder
+    ):
 
-    files = sorted([
+        os.makedirs(
+            cogs_folder
+        )
+
+    files = [
+
         filename
-        for filename in os.listdir(cogs_folder)
+
+        for filename in os.listdir(
+            cogs_folder
+        )
+
         if (
             filename.endswith(".py")
-            and not filename.startswith("_")
+            and
+            not filename.startswith("_")
         )
-    ])
-
-    master_names = {
-        "masterconfig.py",
-        "master_config.py",
-    }
-
-    normal_files = [
-        filename
-        for filename in files
-        if filename.lower() not in master_names
     ]
 
-    print("==========================================")
-    print("🔧 LOADING DISCORD COGS")
-    print("==========================================")
-    print(f"📁 Cogs directory: {os.path.abspath(cogs_folder)}")
-    print(f"📦 Found {len(files)} Python cog file(s).")
+    # ========================================================
+    # MASTER CONFIG MUST LOAD FIRST
+    # ========================================================
 
-    if not normal_files:
-        print("⚠️ No normal cog files were found.")
+    master_cog = None
 
-    for filename in normal_files:
+    for filename in files:
 
-        extension = f"cogs.{filename[:-3]}"
+        if filename.lower() in {
+            "masterconfig.py",
+            "master_config.py",
+        }:
+
+            master_cog = filename
+
+            break
+
+    # --------------------------------------------------------
+    # Remove Master Config from normal list
+    # --------------------------------------------------------
+
+    if master_cog:
+
+        files.remove(
+            master_cog
+        )
+
+        extension = (
+            f"cogs.{master_cog[:-3]}"
+        )
 
         try:
-            print(f"🔄 Loading cog: {filename}")
 
-            await bot.load_extension(extension)
+            await bot.load_extension(
+                extension
+            )
 
-            print(f"✅ Loaded cog: {filename}")
+            print(
+                f"🧠 Loaded FIRST: "
+                f"{master_cog}"
+            )
 
         except Exception as e:
 
-            print(f"❌ Failed to load {filename}: {e}")
-            import traceback
-            traceback.print_exc()
+            print(
+                f"❌ Failed to load "
+                f"{master_cog}: {e}"
+            )
 
-    print("==========================================")
-    print(f"📊 COG LOAD COMPLETE: {len(bot.cogs)} cog(s)")
-    print("==========================================")
+            raise
+
+    else:
+
+        print(
+            "⚠️ WARNING: "
+            "masterconfig.py was not found!"
+        )
+
+    # ========================================================
+    # LOAD EVERYTHING ELSE
+    # ========================================================
+
+    for filename in sorted(
+        files
+    ):
+
+        extension = (
+            f"cogs.{filename[:-3]}"
+        )
+
+        try:
+
+            await bot.load_extension(
+                extension
+            )
+
+            print(
+                f"✅ Loaded cog: {filename}"
+            )
+
+        except Exception as e:
+
+            print(
+                f"❌ Failed to load "
+                f"{filename}: {e}"
+            )
 
 
 # ---------- BOT SETUP ----------
-
 @bot.event
 async def setup_hook():
 
-    print("==========================================")
-    print("🚀 DISCORD SETUP HOOK STARTED")
-    print("==========================================")
+    # ---------------------------------------------------------
+    # Load masterconfig FIRST
+    # Then automatically load every other Cog
+    # ---------------------------------------------------------
 
     await load_cogs()
 
-    # Sync commands for all normal cogs.
+    # ---------------------------------------------------------
+    # Sync slash commands
+    # ---------------------------------------------------------
+
     try:
 
         synced = await bot.tree.sync()
@@ -233,145 +286,16 @@ async def setup_hook():
             f"❌ Failed to sync slash commands: {e}"
         )
 
-        import traceback
-        traceback.print_exc()
 
-    print("==========================================")
-    print("✅ DISCORD SETUP HOOK FINISHED")
-    print("==========================================")
-
-
-# ---------- START WEB SERVER ----------
-keep_alive()
 # ---------- BOT STARTUP ----------
 @bot.event
 async def on_ready():
 
-    print("==========================================")
-    print(f"🤖 Bot online as {bot.user}")
-    print(f"🆔 Bot ID: {bot.user.id}")
-    print(f"🌐 Guilds: {len(bot.guilds)}")
-    print(f"🧩 Loaded cogs: {len(bot.cogs)}")
-    print("==========================================")
+    print(
+        f"🤖 Bot online as {bot.user}"
+    )
 
-    # ---------------------------------------------------------
-    # Load MasterConfig AFTER Discord is fully ready.
-    #
-    # This prevents Supabase connection/restore work from
-    # blocking setup_hook and preventing the other cogs from
-    # loading.
-    # ---------------------------------------------------------
-
-    master_extension = None
-
-    for candidate in (
-        "cogs.masterconfig",
-        "cogs.master_config",
-    ):
-
-        if candidate in bot.extensions:
-            master_extension = candidate
-            break
-
-    if master_extension is None:
-
-        for candidate in (
-            "cogs.masterconfig",
-            "cogs.master_config",
-        ):
-
-            try:
-
-                print(
-                    f"🧠 Loading MasterConfig after on_ready: "
-                    f"{candidate}"
-                )
-
-                await bot.load_extension(candidate)
-
-                master_extension = candidate
-
-                print(
-                    f"✅ MasterConfig loaded: {candidate}"
-                )
-
-                break
-
-            except Exception as e:
-
-                print(
-                    f"⚠️ Could not load {candidate}: {e}"
-                )
-
-    # ---------------------------------------------------------
-    # If MasterConfig exposes a post-ready initializer, use it.
-    # ---------------------------------------------------------
-
-    master_cog = bot.get_cog("MasterConfig")
-
-    if master_cog:
-
-        initialize = getattr(
-            master_cog,
-            "initialize_after_ready",
-            None
-        )
-
-        if initialize:
-
-            try:
-
-                await initialize()
-
-            except Exception as e:
-
-                print(
-                    f"❌ MasterConfig initialization failed: {e}"
-                )
-
-                import traceback
-                traceback.print_exc()
-
-        # If a standalone sync method exists, run it.
-        sync_method = getattr(
-            master_cog,
-            "sync_all_cogs",
-            None
-        )
-
-        if sync_method:
-
-            try:
-
-                await sync_method()
-
-            except Exception as e:
-
-                print(
-                    f"❌ Cog restore sync failed: {e}"
-                )
-
-                import traceback
-                traceback.print_exc()
-
-    # ---------------------------------------------------------
-    # Sync again after MasterConfig commands are loaded.
-    # ---------------------------------------------------------
-
-    try:
-
-        synced = await bot.tree.sync()
-
-        print(
-            f"✅ Final slash-command sync: "
-            f"{len(synced)} command(s)"
-        )
-
-    except Exception as e:
-
-        print(
-            f"❌ Final slash-command sync failed: {e}"
-        )
+    keep_alive()
 
     await bot.change_presence(
 
@@ -385,19 +309,9 @@ async def on_ready():
         status=discord.Status.online
     )
 
-    print("==========================================")
-    print("🟢 BOT STARTUP COMPLETE")
-    print("==========================================")
-
 
 # ---------- START BOT ----------
-if not DISCORD_TOKEN:
-    raise RuntimeError(
-        "DISCORD_TOKEN is missing from the environment."
-    )
-
 bot.run(DISCORD_TOKEN)
-
 
 
 
