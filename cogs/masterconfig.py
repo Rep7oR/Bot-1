@@ -1,261 +1,978 @@
 # ============================================================
-# MASTER CONFIG / REFRESH SYSTEM
+# MASTER CONFIGURATION SYSTEM
 # ============================================================
 #
-# This Cog directly reads the REAL JSON configuration files
-# used by your other Cogs.
+# PURPOSE:
 #
-# It does NOT depend on config_manager.py.
-#
-# Examples:
-#
-# voice_config.json
-# youtube_config.json
-# welcome_config.json
-# support_config.json
-# rules_config.json
-# etc.
-#
-# Commands:
-#
-# /refresh
-# /configfiles
-# /configread <filename>
+# 1. Master Config loads FIRST.
+# 2. Restores all saved JSON configuration files.
+# 3. Other Cogs are loaded AFTER restoration.
+# 4. Configuration is stored on Render Persistent Disk.
+# 5. Existing JSON files are automatically discovered.
+# 6. New JSON files can be detected automatically.
+# 7. /refresh shows all Cogs, configurations and commands.
+# 8. Configuration is backed up every 15 seconds.
 #
 # ============================================================
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 
-import json
 import os
+import json
+import asyncio
 import traceback
-from pathlib import Path
 from datetime import datetime, timezone
 
 
 # ============================================================
-# CONFIGURATION
+# SETTINGS
 # ============================================================
 
-# Your Cogs currently save their JSON files in the project root.
-CONFIG_ROOT = Path(".")
+# Render:
+#
+# BOT_PERSIST_DIR=/data
+#
+# Local:
+#
+# BOT_PERSIST_DIR=data
+#
+# ============================================================
+
+PERSISTENT_DIR = os.getenv(
+    "BOT_PERSIST_DIR",
+    "data"
+)
+
+os.makedirs(
+    PERSISTENT_DIR,
+    exist_ok=True
+)
 
 
-# JSON files which are NOT bot configuration files.
-IGNORED_JSON_FILES = {
-    "package.json",
-    "package-lock.json",
+MASTER_FILE = os.path.join(
+    PERSISTENT_DIR,
+    "master_config.json"
+)
+
+
+# ============================================================
+# CONFIGURATION FILES
+# ============================================================
+#
+# These are known configuration files.
+#
+# The system will ALSO automatically discover other
+# JSON configuration files in the project root.
+#
+# ============================================================
+
+CONFIG_FILES = {
+
+    "Auto_Reply": "ai_chat_config.json",
+
+    "Clan": "clan_data.json",
+
+    "cmd": "cmd_config.json",
+
+    "help_system": "help_config.json",
+
+    "moderator_online": "moderator_online.json",
+
+    "moderator_stats": "moderator_stats.json",
+
+    "music_system": "music_config.json",
+
+    "voice": "voice_config.json",
+
+    "welcome": "welcome_config.json",
+
+    "youtube": "youtube_config.json",
+
+    "rules": "rules_config.json",
 }
 
 
-# Files which should not be displayed as bot configurations.
-# Add any other non-config JSON files here if necessary.
-IGNORED_CONFIG_NAMES = {
-    "bot_config.json",
+# ============================================================
+# COGS WITHOUT JSON CONFIGURATION
+# ============================================================
+
+NO_CONFIG_COGS = {
+
+    "Announce",
+    "Invite",
+    "DMCommands",
+    "RoleManager",
+    "MissingSlash",
+    "SlashChecker",
+    "MasterConfig",
 }
 
 
 # ============================================================
-# JSON READER
+# LOCK
 # ============================================================
 
-def read_json_file(filepath):
-    """
-    Read a JSON file safely.
+config_lock = asyncio.Lock()
 
-    Returns:
-        (data, None)
-    or
-        (None, error_message)
-    """
+
+# ============================================================
+# TIME
+# ============================================================
+
+def utc_now():
+
+    return datetime.now(
+        timezone.utc
+    ).isoformat()
+
+
+# ============================================================
+# JSON READ
+# ============================================================
+
+def read_json(path):
+
+    if not os.path.exists(path):
+
+        return None
 
     try:
 
         with open(
-            filepath,
+            path,
             "r",
             encoding="utf-8"
         ) as file:
 
-            data = json.load(file)
-
-        return data, None
-
-    except FileNotFoundError:
-
-        return None, "File not found."
-
-    except json.JSONDecodeError as e:
-
-        return None, (
-            f"Invalid JSON: {e}"
-        )
-
-    except Exception as e:
-
-        return None, (
-            f"{type(e).__name__}: {e}"
-        )
-
-
-# ============================================================
-# FIND CONFIGURATION FILES
-# ============================================================
-
-def find_config_files():
-
-    files = []
-
-    # --------------------------------------------------------
-    # Project root
-    # --------------------------------------------------------
-
-    try:
-
-        for filepath in CONFIG_ROOT.glob("*.json"):
-
-            if filepath.name in IGNORED_JSON_FILES:
-                continue
-
-            if filepath.name in IGNORED_CONFIG_NAMES:
-                continue
-
-            files.append(filepath)
+            return json.load(file)
 
     except Exception as e:
 
         print(
-            f"❌ Error scanning root JSON files: {e}"
+            f"❌ Failed reading {path}: {e}"
         )
 
+        return None
+
+
+# ============================================================
+# JSON WRITE
+# ============================================================
+
+def write_json(
+    path,
+    data
+):
+
+    try:
+
+        directory = os.path.dirname(path)
+
+        if directory:
+
+            os.makedirs(
+                directory,
+                exist_ok=True
+            )
+
+        temporary = (
+            path + ".tmp"
+        )
+
+        with open(
+            temporary,
+            "w",
+            encoding="utf-8"
+        ) as file:
+
+            json.dump(
+                data,
+                file,
+                indent=4,
+                ensure_ascii=False
+            )
+
+        os.replace(
+            temporary,
+            path
+        )
+
+        return True
+
+    except Exception as e:
+
+        print(
+            f"❌ Failed writing {path}: {e}"
+        )
+
+        return False
+
+
+# ============================================================
+# MASTER FILE
+# ============================================================
+
+def empty_master():
+
+    return {
+
+        "version": 2,
+
+        "created_at": utc_now(),
+
+        "last_backup": None,
+
+        "files": {}
+
+    }
+
+
+def load_master():
+
+    if not os.path.exists(
+        MASTER_FILE
+    ):
+
+        return empty_master()
+
+    data = read_json(
+        MASTER_FILE
+    )
+
+    if not isinstance(
+        data,
+        dict
+    ):
+
+        return empty_master()
+
+    data.setdefault(
+        "version",
+        2
+    )
+
+    data.setdefault(
+        "created_at",
+        utc_now()
+    )
+
+    data.setdefault(
+        "last_backup",
+        None
+    )
+
+    data.setdefault(
+        "files",
+        {}
+    )
+
+    if not isinstance(
+        data["files"],
+        dict
+    ):
+
+        data["files"] = {}
+
+    return data
+
+
+master_data = load_master()
+
+
+# ============================================================
+# FILE PATH
+# ============================================================
+
+def config_path(
+    filename
+):
+
+    return os.path.join(
+        os.getcwd(),
+        filename
+    )
+
+
+# ============================================================
+# PERSISTENT BACKUP PATH
+# ============================================================
+
+def persistent_config_path(
+    filename
+):
+
+    return os.path.join(
+        PERSISTENT_DIR,
+        "configs",
+        filename
+    )
+
+
+# ============================================================
+# AUTOMATIC JSON DISCOVERY
+# ============================================================
+
+def discover_json_files():
+
+    discovered = {}
+
+    try:
+
+        for filename in os.listdir(
+            os.getcwd()
+        ):
+
+            if not filename.endswith(
+                ".json"
+            ):
+
+                continue
+
+            if filename.startswith(
+                "."
+            ):
+
+                continue
+
+            if filename in {
+                "package.json",
+                "package-lock.json",
+            }:
+
+                continue
+
+            # Never treat master_config itself
+            # as a Cog configuration file.
+
+            if filename == "master_config.json":
+
+                continue
+
+            path = config_path(
+                filename
+            )
+
+            if not os.path.isfile(
+                path
+            ):
+
+                continue
+
+            discovered[
+                filename
+            ] = filename
+
+    except Exception as e:
+
+        print(
+            f"⚠️ JSON discovery error: {e}"
+        )
+
+    return discovered
+
+
+# ============================================================
+# GET ALL CONFIG FILES
+# ============================================================
+
+def get_all_config_files():
+
+    result = {}
+
     # --------------------------------------------------------
-    # Cogs folder
+    # Known files
     # --------------------------------------------------------
 
-    cogs_folder = CONFIG_ROOT / "cogs"
+    for cog_name, filename in (
+        CONFIG_FILES.items()
+    ):
 
-    if cogs_folder.exists():
+        result[
+            filename
+        ] = cog_name
 
-        try:
+    # --------------------------------------------------------
+    # Automatically discovered files
+    # --------------------------------------------------------
 
-            for filepath in cogs_folder.glob("*.json"):
+    discovered = discover_json_files()
 
-                if filepath.name in IGNORED_JSON_FILES:
-                    continue
+    for filename in discovered:
 
-                if filepath.name in IGNORED_CONFIG_NAMES:
-                    continue
+        if filename not in result:
 
-                if filepath not in files:
-
-                    files.append(filepath)
-
-        except Exception as e:
-
-            print(
-                f"❌ Error scanning Cogs JSON files: {e}"
+            result[
+                filename
+            ] = (
+                filename
+                .replace(
+                    ".json",
+                    ""
+                )
+                .replace(
+                    "_",
+                    " "
+                )
+                .title()
             )
 
     # --------------------------------------------------------
-    # Sort
+    # Files already stored in master backup
+    #
+    # This is VERY important.
+    #
+    # Even if the current deployment doesn't contain the
+    # original JSON file yet, the master backup still knows
+    # about it.
     # --------------------------------------------------------
 
-    files.sort(
-        key=lambda x: x.name.lower()
-    )
+    for filename in master_data.get(
+        "files",
+        {}
+    ):
 
-    return files
+        if filename not in result:
+
+            backup = master_data[
+                "files"
+            ].get(
+                filename,
+                {}
+            )
+
+            result[
+                filename
+            ] = backup.get(
+                "cog",
+                filename
+            )
+
+    return result
 
 
 # ============================================================
-# GET FRIENDLY NAME
+# MIGRATE OLD LOCAL CONFIG
+# ============================================================
+#
+# If a JSON configuration already exists locally and there
+# is no persistent backup yet, save it to persistent storage.
+#
+# This prevents existing setups from being lost when moving
+# to the new system.
+#
 # ============================================================
 
-def get_config_name(filename):
+def migrate_existing_configs():
 
-    name = Path(
-        filename
-    ).stem
+    global master_data
 
-    # Remove common config suffixes
-    suffixes = [
-        "_config",
-        "_data",
-        "config",
-        "data"
-    ]
+    changed = False
 
-    for suffix in suffixes:
+    all_files = get_all_config_files()
 
-        if name.lower().endswith(
-            suffix
+    for filename, cog_name in (
+        all_files.items()
+    ):
+
+        local_path = config_path(
+            filename
+        )
+
+        persistent_path = (
+            persistent_config_path(
+                filename
+            )
+        )
+
+        # ----------------------------------------------------
+        # Existing local file
+        # ----------------------------------------------------
+
+        if os.path.exists(
+            local_path
         ):
 
-            name = name[
-                :-len(suffix)
-            ]
+            data = read_json(
+                local_path
+            )
 
-            break
+            if data is not None:
 
-    # Replace separators
-    name = name.replace(
-        "_",
-        " "
-    )
+                # Only create persistent copy if one
+                # doesn't already exist.
 
-    name = name.replace(
-        "-",
-        " "
-    )
+                if not os.path.exists(
+                    persistent_path
+                ):
 
-    return name.strip().title()
+                    if write_json(
+                        persistent_path,
+                        data
+                    ):
+
+                        print(
+                            f"📦 Migrated "
+                            f"{filename} "
+                            f"to persistent storage."
+                        )
+
+                        changed = True
+
+                # Master index
+                if filename not in master_data[
+                    "files"
+                ]:
+
+                    master_data[
+                        "files"
+                    ][filename] = {
+
+                        "cog": cog_name,
+
+                        "updated_at": utc_now(),
+
+                        "data": data
+                    }
+
+                    changed = True
+
+    if changed:
+
+        master_data[
+            "last_backup"
+        ] = utc_now()
+
+        write_json(
+            MASTER_FILE,
+            master_data
+        )
 
 
 # ============================================================
-# FIND GUILD CONFIGURATION
+# RESTORE ALL CONFIGURATIONS
 # ============================================================
 
-def find_guild_config(
+def restore_all_configs():
+
+    global master_data
+
+    restored = []
+
+    all_files = get_all_config_files()
+
+    # --------------------------------------------------------
+    # First restore from persistent config copies
+    # --------------------------------------------------------
+
+    for filename, cog_name in (
+        all_files.items()
+    ):
+
+        target = config_path(
+            filename
+        )
+
+        persistent_path = (
+            persistent_config_path(
+                filename
+            )
+        )
+
+        # ----------------------------------------------------
+        # Current file already exists
+        # ----------------------------------------------------
+
+        if os.path.exists(
+            target
+        ):
+
+            continue
+
+        # ----------------------------------------------------
+        # Persistent copy
+        # ----------------------------------------------------
+
+        if os.path.exists(
+            persistent_path
+        ):
+
+            data = read_json(
+                persistent_path
+            )
+
+            if data is not None:
+
+                if write_json(
+                    target,
+                    data
+                ):
+
+                    restored.append(
+                        filename
+                    )
+
+                    print(
+                        f"♻️ Restored "
+                        f"{filename} "
+                        f"from persistent storage."
+                    )
+
+                continue
+
+        # ----------------------------------------------------
+        # Master backup
+        # ----------------------------------------------------
+
+        backup = master_data.get(
+            "files",
+            {}
+        ).get(
+            filename
+        )
+
+        if not backup:
+
+            continue
+
+        data = backup.get(
+            "data"
+        )
+
+        if data is None:
+
+            continue
+
+        if write_json(
+            target,
+            data
+        ):
+
+            restored.append(
+                filename
+            )
+
+            print(
+                f"♻️ Restored "
+                f"{filename} "
+                f"from master backup."
+            )
+
+    return restored
+
+
+# ============================================================
+# BACKUP ALL CONFIGURATIONS
+# ============================================================
+
+def backup_all_configs():
+
+    global master_data
+
+    changed = False
+
+    all_files = get_all_config_files()
+
+    for filename, cog_name in (
+        all_files.items()
+    ):
+
+        local_path = config_path(
+            filename
+        )
+
+        persistent_path = (
+            persistent_config_path(
+                filename
+            )
+        )
+
+        # ----------------------------------------------------
+        # Local file exists
+        # ----------------------------------------------------
+
+        if os.path.exists(
+            local_path
+        ):
+
+            data = read_json(
+                local_path
+            )
+
+            if data is not None:
+
+                # --------------------------------------------
+                # Save persistent copy
+                # --------------------------------------------
+
+                if write_json(
+                    persistent_path,
+                    data
+                ):
+
+                    pass
+
+                # --------------------------------------------
+                # Save master index
+                # --------------------------------------------
+
+                previous = master_data[
+                    "files"
+                ].get(
+                    filename
+                )
+
+                master_data[
+                    "files"
+                ][filename] = {
+
+                    "cog": cog_name,
+
+                    "updated_at": utc_now(),
+
+                    "data": data
+                }
+
+                # Only mark changed if actual config
+                # changed.
+
+                if previous is None:
+
+                    changed = True
+
+                elif previous.get(
+                    "data"
+                ) != data:
+
+                    changed = True
+
+        # ----------------------------------------------------
+        # Local file missing
+        #
+        # DO NOT delete its backup.
+        #
+        # This is extremely important.
+        # ----------------------------------------------------
+
+        else:
+
+            if filename in master_data.get(
+                "files",
+                {}
+            ):
+
+                continue
+
+    # --------------------------------------------------------
+    # Update timestamp
+    # --------------------------------------------------------
+
+    master_data[
+        "last_backup"
+    ] = utc_now()
+
+    # --------------------------------------------------------
+    # Always save master file.
+    #
+    # This makes sure newly discovered JSON files are
+    # registered even when the actual data didn't change.
+    # --------------------------------------------------------
+
+    success = write_json(
+        MASTER_FILE,
+        master_data
+    )
+
+    if success:
+
+        if changed:
+
+            print(
+                "💾 Master configuration backup updated."
+            )
+
+    return success
+
+
+# ============================================================
+# STARTUP RESTORE
+# ============================================================
+
+def prepare_configuration():
+
+    print(
+        "=========================================="
+    )
+
+    print(
+        "🧠 MASTER CONFIG STARTUP"
+    )
+
+    print(
+        "=========================================="
+    )
+
+    print(
+        f"📁 Persistent directory: "
+        f"{PERSISTENT_DIR}"
+    )
+
+    print(
+        f"📄 Master file: "
+        f"{MASTER_FILE}"
+    )
+
+    # --------------------------------------------------------
+    # Migrate existing configuration first
+    # --------------------------------------------------------
+
+    try:
+
+        migrate_existing_configs()
+
+    except Exception as e:
+
+        print(
+            f"⚠️ Migration error: {e}"
+        )
+
+    # --------------------------------------------------------
+    # Reload master after migration
+    # --------------------------------------------------------
+
+    global master_data
+
+    master_data = load_master()
+
+    # --------------------------------------------------------
+    # Restore
+    # --------------------------------------------------------
+
+    try:
+
+        restored = restore_all_configs()
+
+        if restored:
+
+            print(
+                "♻️ Configuration restored:"
+            )
+
+            for filename in restored:
+
+                print(
+                    f"   └── {filename}"
+                )
+
+        else:
+
+            print(
+                "ℹ️ No configuration files "
+                "needed restoration."
+            )
+
+    except Exception as e:
+
+        print(
+            f"❌ Restore error: {e}"
+        )
+
+    print(
+        "=========================================="
+    )
+
+
+# ============================================================
+# CONFIGURATION STATUS
+# ============================================================
+
+def configuration_status(
+    filename
+):
+
+    path = config_path(
+        filename
+    )
+
+    if os.path.exists(
+        path
+    ):
+
+        data = read_json(
+            path
+        )
+
+        if data is None:
+
+            return (
+                "❌",
+                "Configuration file exists "
+                "but could not be read."
+            )
+
+        if isinstance(
+            data,
+            dict
+        ) and not data:
+
+            return (
+                "⚪",
+                "Configuration file is empty."
+            )
+
+        return (
+            "✅",
+            "Configuration saved."
+        )
+
+    # --------------------------------------------------------
+    # Persistent backup
+    # --------------------------------------------------------
+
+    persistent = (
+        persistent_config_path(
+            filename
+        )
+    )
+
+    if os.path.exists(
+        persistent
+    ):
+
+        return (
+            "♻️",
+            "Persistent backup available."
+        )
+
+    # --------------------------------------------------------
+    # Master backup
+    # --------------------------------------------------------
+
+    if filename in master_data.get(
+        "files",
+        {}
+    ):
+
+        return (
+            "♻️",
+            "Master backup available."
+        )
+
+    return (
+        "⚪",
+        "Not configured."
+    )
+
+
+# ============================================================
+# GUILD CONFIG EXTRACTION
+# ============================================================
+
+def extract_guild_config(
     data,
     guild_id
 ):
-    """
-    Supports multiple JSON structures.
-
-    Structure 1:
-
-    {
-        "123456789": {
-            ...
-        }
-    }
-
-    Structure 2:
-
-    {
-        "guilds": {
-            "123456789": {
-                ...
-            }
-        }
-    }
-
-    Structure 3:
-
-    {
-        "guild_id": 123456789,
-        ...
-    }
-
-    Structure 4:
-
-    {
-        "server_id": 123456789,
-        ...
-    }
-    """
 
     if not isinstance(
         data,
@@ -264,138 +981,129 @@ def find_guild_config(
 
         return None
 
-    guild_id_string = str(
+    guild_id = str(
         guild_id
     )
 
     # --------------------------------------------------------
-    # Direct string guild key
+    # Normal:
+    #
+    # {
+    #   "123456": {...}
+    # }
     # --------------------------------------------------------
 
-    if guild_id_string in data:
+    if guild_id in data:
 
         return data[
-            guild_id_string
+            guild_id
         ]
 
     # --------------------------------------------------------
-    # Direct integer guild key
+    # Nested guilds:
+    #
+    # {
+    #   "guilds": {
+    #       "123456": {...}
+    #   }
+    # }
     # --------------------------------------------------------
+
+    guilds = data.get(
+        "guilds"
+    )
+
+    if isinstance(
+        guilds,
+        dict
+    ):
+
+        if guild_id in guilds:
+
+            return guilds[
+                guild_id
+            ]
+
+    return None
+
+
+# ============================================================
+# CHANNEL RESOLVER
+# ============================================================
+
+def resolve_channel(
+    guild,
+    channel_id
+):
+
+    if channel_id is None:
+
+        return None
 
     try:
 
-        guild_id_integer = int(
-            guild_id
+        return guild.get_channel(
+            int(channel_id)
         )
 
-        if guild_id_integer in data:
+    except Exception:
 
-            return data[
-                guild_id_integer
-            ]
+        return None
+
+
+# ============================================================
+# ROLE RESOLVER
+# ============================================================
+
+def resolve_role(
+    guild,
+    role_id
+):
+
+    if role_id is None:
+
+        return None
+
+    try:
+
+        return guild.get_role(
+            int(role_id)
+        )
+
+    except Exception:
+
+        return None
+
+
+# ============================================================
+# CATEGORY RESOLVER
+# ============================================================
+
+def resolve_category(
+    guild,
+    category_id
+):
+
+    if category_id is None:
+
+        return None
+
+    try:
+
+        channel = guild.get_channel(
+            int(category_id)
+        )
+
+        if isinstance(
+            channel,
+            discord.CategoryChannel
+        ):
+
+            return channel
 
     except Exception:
 
         pass
-
-    # --------------------------------------------------------
-    # Common containers
-    # --------------------------------------------------------
-
-    containers = [
-        "guilds",
-        "servers",
-        "configurations",
-        "configs",
-        "data"
-    ]
-
-    for container_name in containers:
-
-        container = data.get(
-            container_name
-        )
-
-        if not isinstance(
-            container,
-            dict
-        ):
-
-            continue
-
-        if guild_id_string in container:
-
-            return container[
-                guild_id_string
-            ]
-
-        try:
-
-            guild_id_integer = int(
-                guild_id
-            )
-
-            if guild_id_integer in container:
-
-                return container[
-                    guild_id_integer
-                ]
-
-        except Exception:
-
-            pass
-
-    # --------------------------------------------------------
-    # Object containing guild_id
-    # --------------------------------------------------------
-
-    saved_guild_id = data.get(
-        "guild_id"
-    )
-
-    if saved_guild_id is not None:
-
-        if str(
-            saved_guild_id
-        ) == guild_id_string:
-
-            return data
-
-    # --------------------------------------------------------
-    # Object containing server_id
-    # --------------------------------------------------------
-
-    saved_server_id = data.get(
-        "server_id"
-    )
-
-    if saved_server_id is not None:
-
-        if str(
-            saved_server_id
-        ) == guild_id_string:
-
-            return data
-
-    # --------------------------------------------------------
-    # Object containing id
-    # --------------------------------------------------------
-
-    saved_id = data.get(
-        "id"
-    )
-
-    if saved_id is not None:
-
-        if str(
-            saved_id
-        ) == guild_id_string:
-
-            return data
-
-    # --------------------------------------------------------
-    # Nothing found
-    # --------------------------------------------------------
 
     return None
 
@@ -405,30 +1113,18 @@ def find_guild_config(
 # ============================================================
 
 def format_value(
-    value,
-    guild=None,
-    depth=0
+    guild,
+    key,
+    value
 ):
-    """
-    Convert JSON data to readable Discord text.
 
-    Attempts to resolve:
-        channel IDs
-        role IDs
-        category IDs
-    """
-
-    # --------------------------------------------------------
-    # None
-    # --------------------------------------------------------
+    key_lower = str(
+        key
+    ).lower()
 
     if value is None:
 
-        return "`None`"
-
-    # --------------------------------------------------------
-    # Boolean
-    # --------------------------------------------------------
+        return "Not configured"
 
     if isinstance(
         value,
@@ -443,97 +1139,112 @@ def format_value(
         )
 
     # --------------------------------------------------------
-    # Number
+    # Channel
     # --------------------------------------------------------
 
-    if isinstance(
-        value,
-        (int, float)
+    if (
+        "channel" in key_lower
+        and "id" in key_lower
     ):
 
-        return f"`{value}`"
+        channel = resolve_channel(
+            guild,
+            value
+        )
 
-    # --------------------------------------------------------
-    # String
-    # --------------------------------------------------------
+        if channel:
 
-    if isinstance(
-        value,
-        str
-    ):
-
-        # --------------------------------------------
-        # Possible Discord ID
-        # --------------------------------------------
-
-        if (
-            value.isdigit()
-            and len(value) >= 15
-        ):
-
-            if guild is not None:
-
-                try:
-
-                    discord_id = int(
-                        value
-                    )
-
-                    # ----------------------------
-                    # Channel
-                    # ----------------------------
-
-                    channel = guild.get_channel(
-                        discord_id
-                    )
-
-                    if channel:
-
-                        return (
-                            f"{channel.mention} "
-                            f"`({channel.name})`"
-                        )
-
-                    # ----------------------------
-                    # Role
-                    # ----------------------------
-
-                    role = guild.get_role(
-                        discord_id
-                    )
-
-                    if role:
-
-                        return (
-                            f"{role.mention} "
-                            f"`({role.name})`"
-                        )
-
-                except Exception:
-
-                    pass
-
-            return (
-                f"`{value}`"
-            )
-
-        # --------------------------------------------
-        # Normal string
-        # --------------------------------------------
-
-        if len(value) > 900:
-
-            value = (
-                value[:900]
-                + "..."
-            )
+            return channel.mention
 
         return (
+            f"⚠️ Missing channel "
             f"`{value}`"
         )
 
     # --------------------------------------------------------
-    # List
+    # Category
+    # --------------------------------------------------------
+
+    if (
+        "category" in key_lower
+        and "id" in key_lower
+    ):
+
+        category = resolve_category(
+            guild,
+            value
+        )
+
+        if category:
+
+            return (
+                f"`{category.name}`"
+            )
+
+        return (
+            f"⚠️ Missing category "
+            f"`{value}`"
+        )
+
+    # --------------------------------------------------------
+    # Role
+    # --------------------------------------------------------
+
+    if (
+        "role" in key_lower
+        and "id" in key_lower
+    ):
+
+        role = resolve_role(
+            guild,
+            value
+        )
+
+        if role:
+
+            return role.mention
+
+        return (
+            f"⚠️ Missing role "
+            f"`{value}`"
+        )
+
+    # --------------------------------------------------------
+    # User/member
+    # --------------------------------------------------------
+
+    if (
+        key_lower.endswith(
+            "user_id"
+        )
+        or
+        key_lower.endswith(
+            "member_id"
+        )
+        or
+        key_lower.endswith(
+            "owner_id"
+        )
+    ):
+
+        try:
+
+            member = guild.get_member(
+                int(value)
+            )
+
+            if member:
+
+                return member.mention
+
+        except Exception:
+
+            pass
+
+        return f"`{value}`"
+
+    # --------------------------------------------------------
+    # Lists
     # --------------------------------------------------------
 
     if isinstance(
@@ -543,35 +1254,23 @@ def format_value(
 
         if not value:
 
-            return "`[]`"
+            return "None"
 
-        output = []
-
-        for item in value[:30]:
-
-            formatted = format_value(
-                item,
-                guild,
-                depth + 1
-            )
-
-            output.append(
-                f"• {formatted}"
-            )
-
-        if len(value) > 30:
-
-            output.append(
-                f"• `... "
-                f"{len(value) - 30} more items`"
-            )
-
-        return "\n".join(
-            output
+        text = ", ".join(
+            str(item)
+            for item in value[:10]
         )
 
+        if len(value) > 10:
+
+            text += (
+                f" + {len(value) - 10} more"
+            )
+
+        return text
+
     # --------------------------------------------------------
-    # Dictionary
+    # Dictionaries
     # --------------------------------------------------------
 
     if isinstance(
@@ -579,221 +1278,225 @@ def format_value(
         dict
     ):
 
-        if not value:
-
-            return "`{}`"
-
-        output = []
-
-        for key, item in value.items():
-
-            key_string = str(
-                key
-            )
-
-            formatted = format_value(
-                item,
-                guild,
-                depth + 1
-            )
-
-            output.append(
-                f"**{key_string}:** {formatted}"
-            )
-
-        return "\n".join(
-            output
+        return (
+            f"`{len(value)} entries`"
         )
 
-    # --------------------------------------------------------
-    # Fallback
-    # --------------------------------------------------------
-
-    return (
-        f"`{str(value)}`"
+    return str(
+        value
     )
 
 
 # ============================================================
-# CHECK SAVED DISCORD OBJECTS
+# FLATTEN CONFIG
 # ============================================================
 
-def check_discord_objects(
+def flatten_config(
+    guild,
     data,
-    guild
+    prefix=""
 ):
-    """
-    Recursively inspect JSON for common Discord IDs.
 
-    Returns:
+    lines = []
 
-        existing
-        missing
-    """
-
-    existing = []
-    missing = []
-
-    # --------------------------------------------------------
-    # Recursive scanner
-    # --------------------------------------------------------
-
-    def scan(
-        value,
-        key_name=""
+    if not isinstance(
+        data,
+        dict
     ):
 
-        # --------------------------------------------
-        # Dictionary
-        # --------------------------------------------
+        return lines
+
+    for key, value in data.items():
+
+        key_text = str(
+            key
+        ).replace(
+            "_",
+            " "
+        ).title()
+
+        current_key = (
+            f"{prefix}.{key}"
+            if prefix
+            else str(key)
+        )
+
+        # ----------------------------------------------------
+        # Nested dictionaries
+        # ----------------------------------------------------
 
         if isinstance(
             value,
             dict
         ):
 
-            for key, child in value.items():
+            if key in {
+                "pending",
+                "clans",
+                "tickets",
+                "members",
+                "requests",
+                "applications",
+                "stats",
+                "users",
+                "cache",
+            }:
 
-                scan(
-                    child,
-                    str(key)
+                lines.append(
+                    f"**{key_text}:** "
+                    f"`{len(value)} entries`"
                 )
 
-            return
+                continue
 
-        # --------------------------------------------
-        # List
-        # --------------------------------------------
+            nested = flatten_config(
+                guild,
+                value,
+                current_key
+            )
+
+            if nested:
+
+                lines.extend(
+                    nested
+                )
+
+            else:
+
+                lines.append(
+                    f"**{key_text}:** `{...}`"
+                )
+
+            continue
+
+        # ----------------------------------------------------
+        # Lists
+        # ----------------------------------------------------
 
         if isinstance(
             value,
             list
         ):
 
-            for child in value:
-
-                scan(
-                    child,
-                    key_name
-                )
-
-            return
-
-        # --------------------------------------------
-        # Only inspect IDs
-        # --------------------------------------------
-
-        if not isinstance(
-            value,
-            (str, int)
-        ):
-
-            return
-
-        try:
-
-            value_string = str(
+            formatted = format_value(
+                guild,
+                key,
                 value
             )
 
-            if not (
-                value_string.isdigit()
-                and len(value_string) >= 15
-            ):
-
-                return
-
-            key_lower = (
-                key_name
-                .lower()
+            lines.append(
+                f"**{key_text}:** "
+                f"{formatted}"
             )
 
-            # ----------------------------------------
-            # Channel ID
-            # ----------------------------------------
+            continue
 
-            if (
-                "channel" in key_lower
-                and "id" in key_lower
+        # ----------------------------------------------------
+        # Normal
+        # ----------------------------------------------------
+
+        formatted = format_value(
+            guild,
+            key,
+            value
+        )
+
+        lines.append(
+            f"**{key_text}:** "
+            f"{formatted}"
+        )
+
+    return lines
+
+
+# ============================================================
+# COMMAND DISCOVERY
+# ============================================================
+
+def command_belongs_to_cog(
+    command,
+    cog
+):
+
+    try:
+
+        binding = getattr(
+            command,
+            "binding",
+            None
+        )
+
+        if binding is cog:
+
+            return True
+
+    except Exception:
+
+        pass
+
+    return False
+
+
+def get_cog_commands(
+    bot,
+    cog
+):
+
+    commands_found = []
+
+    # --------------------------------------------------------
+    # Slash commands
+    # --------------------------------------------------------
+
+    try:
+
+        for command in bot.tree.walk_commands():
+
+            if command_belongs_to_cog(
+                command,
+                cog
             ):
 
-                channel = guild.get_channel(
-                    int(value_string)
+                commands_found.append(
+                    "/" + command.qualified_name
                 )
 
-                if channel:
+    except Exception:
 
-                    existing.append(
-                        f"#{channel.name}"
-                    )
+        pass
 
-                else:
+    # --------------------------------------------------------
+    # Prefix commands
+    # --------------------------------------------------------
 
-                    missing.append(
-                        f"channel `{value_string}`"
-                    )
+    try:
 
-            # ----------------------------------------
-            # Role ID
-            # ----------------------------------------
+        for command in bot.commands:
 
-            elif (
-                "role" in key_lower
-                and "id" in key_lower
-            ):
+            try:
 
-                role = guild.get_role(
-                    int(value_string)
+                command_cog = getattr(
+                    command,
+                    "cog",
+                    None
                 )
 
-                if role:
+                if command_cog is cog:
 
-                    existing.append(
-                        f"@{role.name}"
+                    commands_found.append(
+                        "!" + command.name
                     )
 
-                else:
+            except Exception:
 
-                    missing.append(
-                        f"role `{value_string}`"
-                    )
+                pass
 
-            # ----------------------------------------
-            # Category ID
-            # ----------------------------------------
+    except Exception:
 
-            elif (
-                "category" in key_lower
-                and "id" in key_lower
-            ):
+        pass
 
-                category = guild.get_channel(
-                    int(value_string)
-                )
-
-                if category:
-
-                    existing.append(
-                        f"category: {category.name}"
-                    )
-
-                else:
-
-                    missing.append(
-                        f"category `{value_string}`"
-                    )
-
-        except Exception:
-
-            pass
-
-    scan(
-        data
-    )
-
-    return (
-        list(dict.fromkeys(existing)),
-        list(dict.fromkeys(missing))
+    return sorted(
+        set(commands_found)
     )
 
 
@@ -801,7 +1504,7 @@ def check_discord_objects(
 # MASTER CONFIG COG
 # ============================================================
 
-class Refresh(
+class MasterConfig(
     commands.Cog
 ):
 
@@ -813,569 +1516,432 @@ class Refresh(
         self.bot = bot
 
         print(
-            "🔄 Master configuration system loaded."
+            "=========================================="
+        )
+
+        print(
+            "🧠 MASTER CONFIG SYSTEM"
+        )
+
+        print(
+            "=========================================="
+        )
+
+        print(
+            f"📁 Persistent directory: "
+            f"{PERSISTENT_DIR}"
+        )
+
+        print(
+            f"📄 Master file: "
+            f"{MASTER_FILE}"
+        )
+
+        # ----------------------------------------------------
+        # CRITICAL
+        #
+        # Restore BEFORE the other Cogs are loaded.
+        # ----------------------------------------------------
+
+        prepare_configuration()
+
+        # ----------------------------------------------------
+        # Start backup
+        # ----------------------------------------------------
+
+        self.backup_loop.start()
+
+        print(
+            "✅ Master Config System loaded."
         )
 
     # ========================================================
-    # GET COMMANDS FOR COG
+    # UNLOAD
     # ========================================================
 
-    def get_commands_for_cog(
+    def cog_unload(
+        self
+    ):
+
+        self.backup_loop.cancel()
+
+    # ========================================================
+    # BACKUP LOOP
+    # ========================================================
+
+    @tasks.loop(
+        seconds=15
+    )
+    async def backup_loop(
+        self
+    ):
+
+        try:
+
+            async with config_lock:
+
+                backup_all_configs()
+
+        except Exception as e:
+
+            print(
+                f"❌ Master backup error: {e}"
+            )
+
+    # ========================================================
+    # BEFORE BACKUP
+    # ========================================================
+
+    @backup_loop.before_loop
+    async def before_backup(
+        self
+    ):
+
+        await self.bot.wait_until_ready()
+
+    # ========================================================
+    # MANUAL BACKUP
+    # ========================================================
+
+    async def backup_now(
+        self
+    ):
+
+        async with config_lock:
+
+            return backup_all_configs()
+
+    # ========================================================
+    # BUILD COG REPORT
+    # ========================================================
+
+    def build_cog_report(
         self,
+        guild,
+        cog_name,
         cog
     ):
 
-        commands_found = []
-
-        # ----------------------------------------------------
-        # Slash commands
-        # ----------------------------------------------------
-
-        try:
-
-            for command in (
-                self.bot.tree.walk_commands()
-            ):
-
-                try:
-
-                    binding = getattr(
-                        command,
-                        "binding",
-                        None
-                    )
-
-                    if binding is cog:
-
-                        commands_found.append(
-                            f"/{command.qualified_name}"
-                        )
-
-                except Exception:
-
-                    pass
-
-        except Exception:
-
-            pass
-
-        # ----------------------------------------------------
-        # Prefix commands
-        # ----------------------------------------------------
-
-        try:
-
-            for command in self.bot.commands:
-
-                try:
-
-                    command_cog = getattr(
-                        command,
-                        "cog",
-                        None
-                    )
-
-                    if command_cog is cog:
-
-                        commands_found.append(
-                            f"!{command.name}"
-                        )
-
-                except Exception:
-
-                    pass
-
-        except Exception:
-
-            pass
-
-        return sorted(
-            set(commands_found)
+        commands_found = get_cog_commands(
+            self.bot,
+            cog
         )
 
-    # ========================================================
-    # READ ALL CONFIG FILES
-    # ========================================================
+        # ----------------------------------------------------
+        # Find configuration filename
+        # ----------------------------------------------------
 
-    def read_all_config_files(
-        self,
-        guild
-    ):
+        filename = CONFIG_FILES.get(
+            cog_name
+        )
 
-        results = []
+        # ----------------------------------------------------
+        # Aliases
+        # ----------------------------------------------------
 
-        files = find_config_files()
+        if filename is None:
 
-        for filepath in files:
+            aliases = {
 
-            data, error = read_json_file(
-                filepath
-            )
+                "AIChat":
+                    "ai_chat_config.json",
 
-            result = {
+                "AutoReply":
+                    "ai_chat_config.json",
 
-                "filename": filepath.name,
+                "VoiceSystem":
+                    "voice_config.json",
 
-                "name": get_config_name(
-                    filepath.name
-                ),
+                "Welcome":
+                    "welcome_config.json",
 
-                "path": str(
-                    filepath
-                ),
+                "YouTubeSystem":
+                    "youtube_config.json",
 
-                "data": data,
+                "ModeratorOnline":
+                    "moderator_online.json",
 
-                "error": error,
+                "ModeratorStats":
+                    "moderator_stats.json",
 
-                "configured": False,
+                "MusicSystem":
+                    "music_config.json",
 
-                "existing": [],
+                "HelpSystem":
+                    "help_config.json",
 
-                "missing": []
+                "ClanSystem":
+                    "clan_data.json",
+
+                "CommandSystem":
+                    "cmd_config.json",
+
+                "Rules":
+                    "rules_config.json",
+
             }
 
-            # ------------------------------------------------
-            # Error
-            # ------------------------------------------------
-
-            if error:
-
-                results.append(
-                    result
-                )
-
-                continue
-
-            # ------------------------------------------------
-            # Find guild configuration
-            # ------------------------------------------------
-
-            guild_data = find_guild_config(
-
-                data,
-
-                guild.id
+            filename = aliases.get(
+                cog_name
             )
 
-            if guild_data is not None:
-
-                result[
-                    "configured"
-                ] = True
-
-                result[
-                    "guild_data"
-                ] = guild_data
-
-                existing, missing = (
-                    check_discord_objects(
-                        guild_data,
-                        guild
-                    )
-                )
-
-                result[
-                    "existing"
-                ] = existing
-
-                result[
-                    "missing"
-                ] = missing
-
-            else:
-
-                # ------------------------------------------------
-                # Global config
-                # ------------------------------------------------
-
-                result[
-                    "global"
-                ] = data
-
-                # If it looks like a guild-keyed
-                # configuration file, don't call it global.
-                if isinstance(
-                    data,
-                    dict
-                ):
-
-                    guild_keys = [
-
-                        str(key)
-
-                        for key in data.keys()
-
-                        if str(key).isdigit()
-                        and len(str(key)) >= 15
-                    ]
-
-                    if guild_keys:
-
-                        result[
-                            "configured"
-                        ] = False
-
-            results.append(
-                result
-            )
-
-        return results
-
-    # ========================================================
-    # TRY COG SETUP INFORMATION
-    # ========================================================
-
-    async def get_cog_runtime_info(
-        self,
-        cog,
-        guild
-    ):
-
         # ----------------------------------------------------
-        # get_setup_info()
+        # No configuration
         # ----------------------------------------------------
 
-        setup_info = getattr(
-            cog,
-            "get_setup_info",
-            None
-        )
+        if filename is None:
 
-        if callable(
-            setup_info
-        ):
-
-            try:
-
-                result = await setup_info(
-                    guild
-                )
-
-                if isinstance(
-                    result,
-                    dict
-                ):
-
-                    return result
+            if cog_name in NO_CONFIG_COGS:
 
                 return {
 
-                    "status": "✅",
-
-                    "message": str(
-                        result
-                    )
-                }
-
-            except TypeError:
-
-                try:
-
-                    result = await setup_info()
-
-                    if isinstance(
-                        result,
-                        dict
-                    ):
-
-                        return result
-
-                    return {
-
-                        "status": "✅",
-
-                        "message": str(
-                            result
-                        )
-                    }
-
-                except Exception as e:
-
-                    return {
-
-                        "status": "❌",
-
-                        "message": (
-                            f"{type(e).__name__}: "
-                            f"{e}"
-                        )
-                    }
-
-            except Exception as e:
-
-                print(
-                    f"❌ get_setup_info error "
-                    f"in {type(cog).__name__}: {e}"
-                )
-
-                return {
-
-                    "status": "❌",
+                    "status": "ℹ️",
 
                     "message": (
-                        f"{type(e).__name__}: "
-                        f"{e}"
-                    )
+                        "Command-only Cog. "
+                        "No persistent setup required."
+                    ),
+
+                    "config": None,
+
+                    "commands": commands_found,
+
+                    "filename": None
+
                 }
 
+            return {
+
+                "status": "ℹ️",
+
+                "message": (
+                    "No configuration file "
+                    "registered for this Cog."
+                ),
+
+                "config": None,
+
+                "commands": commands_found,
+
+                "filename": None
+
+            }
+
         # ----------------------------------------------------
-        # refresh()
+        # Current file
         # ----------------------------------------------------
 
-        refresh_method = getattr(
-            cog,
-            "refresh",
-            None
+        path = config_path(
+            filename
         )
 
-        if callable(
-            refresh_method
-        ):
-
-            try:
-
-                result = await refresh_method()
-
-                if isinstance(
-                    result,
-                    dict
-                ):
-
-                    return result
-
-                return {
-
-                    "status": "✅",
-
-                    "message": (
-                        str(result)
-                        if result
-                        else
-                        "Refresh completed."
-                    )
-                }
-
-            except Exception as e:
-
-                print(
-                    f"❌ refresh() error "
-                    f"in {type(cog).__name__}: {e}"
-                )
-
-                return {
-
-                    "status": "❌",
-
-                    "message": (
-                        f"{type(e).__name__}: "
-                        f"{e}"
-                    )
-                }
-
-        return None
-
-    # ========================================================
-    # BUILD FILE REPORT
-    # ========================================================
-
-    def build_file_report(
-        self,
-        result,
-        guild
-    ):
-
-        filename = result[
-            "filename"
-        ]
-
-        name = result[
-            "name"
-        ]
-
-        lines = []
-
-        lines.append(
-            f"📦 **{name}**"
-        )
-
-        lines.append(
-            f"📄 `{filename}`"
+        data = read_json(
+            path
         )
 
         # ----------------------------------------------------
-        # Error
+        # Current file missing
         # ----------------------------------------------------
 
-        if result[
-            "error"
-        ]:
+        if data is None:
 
-            lines.append(
-                "❌ **JSON Error**"
-            )
-
-            lines.append(
-                f"`{result['error']}`"
-            )
-
-            return "\n".join(
-                lines
-            )
-
-        # ----------------------------------------------------
-        # Guild configured
-        # ----------------------------------------------------
-
-        if result[
-            "configured"
-        ]:
-
-            lines.append(
-                "🟢 **Configured for this server**"
-            )
-
-            guild_data = result.get(
-                "guild_data",
-                {}
-            )
-
-            formatted = format_value(
-                guild_data,
-                guild
-            )
-
-            if formatted:
-
-                lines.append(
-                    formatted
+            persistent_path = (
+                persistent_config_path(
+                    filename
                 )
-
-            # --------------------------------------------
-            # Existing Discord objects
-            # --------------------------------------------
-
-            existing = result.get(
-                "existing",
-                []
             )
 
-            if existing:
-
-                lines.append(
-                    "✅ **Discord objects:**"
-                )
-
-                lines.append(
-                    "\n".join(
-                        f"• {item}"
-                        for item in existing[:15]
-                    )
-                )
-
-            # --------------------------------------------
-            # Missing Discord objects
-            # --------------------------------------------
-
-            missing = result.get(
-                "missing",
-                []
+            persistent_data = read_json(
+                persistent_path
             )
 
-            if missing:
+            if persistent_data is not None:
 
-                lines.append(
-                    "⚠️ **Missing Discord objects:**"
-                )
+                data = persistent_data
 
-                lines.append(
-                    "\n".join(
-                        f"• {item}"
-                        for item in missing[:15]
-                    )
-                )
+                status = "♻️"
 
-            return "\n".join(
-                lines
-            )
-
-        # ----------------------------------------------------
-        # Global configuration
-        # ----------------------------------------------------
-
-        data = result.get(
-            "global"
-        )
-
-        if isinstance(
-            data,
-            dict
-        ):
-
-            # ------------------------------------------------
-            # Check if this is a guild-based file
-            # ------------------------------------------------
-
-            guild_keys = [
-
-                str(key)
-
-                for key in data.keys()
-
-                if str(key).isdigit()
-                and len(str(key)) >= 15
-            ]
-
-            if guild_keys:
-
-                lines.append(
-                    "🟡 **No configuration "
-                    "for this server**"
-                )
-
-                lines.append(
-                    f"🌐 Servers saved in file: "
-                    f"`{len(guild_keys)}`"
+                message = (
+                    "Persistent backup available."
                 )
 
             else:
 
-                lines.append(
-                    "🔵 **Global configuration**"
+                backup = master_data.get(
+                    "files",
+                    {}
+                ).get(
+                    filename
                 )
 
-                formatted = format_value(
-                    data,
-                    guild
-                )
+                if backup:
 
-                if formatted:
+                    data = backup.get(
+                        "data"
+                    )
 
-                    lines.append(
-                        formatted
+                    status = "♻️"
+
+                    message = (
+                        "Master backup available."
+                    )
+
+                else:
+
+                    data = None
+
+                    status = "⚪"
+
+                    message = (
+                        "Not configured."
                     )
 
         else:
 
-            lines.append(
-                "🟡 **No guild-specific "
-                "configuration found**"
+            status = "✅"
+
+            message = (
+                "Configuration file found."
             )
 
-        return "\n".join(
-            lines
+        # ----------------------------------------------------
+        # Extract guild
+        # ----------------------------------------------------
+
+        guild_config = (
+
+            extract_guild_config(
+                data,
+                guild.id
+            )
+
+            if data is not None
+
+            else None
         )
+
+        # ----------------------------------------------------
+        # Guild configuration exists
+        # ----------------------------------------------------
+
+        if guild_config is not None:
+
+            if isinstance(
+                guild_config,
+                dict
+            ):
+
+                if not guild_config:
+
+                    status = "⚪"
+
+                    message = (
+                        "Guild configuration is empty."
+                    )
+
+            config_to_show = (
+                guild_config
+            )
+
+        else:
+
+            config_to_show = None
+
+            if data is not None:
+
+                status = "⚪"
+
+                message = (
+                    "File exists, but this "
+                    "server has no saved setup."
+                )
+
+        return {
+
+            "status": status,
+
+            "message": message,
+
+            "config": config_to_show,
+
+            "commands": commands_found,
+
+            "filename": filename
+
+        }
+
+    # ========================================================
+    # BUILD REPORTS
+    # ========================================================
+
+    def build_reports(
+        self,
+        guild
+    ):
+
+        reports = []
+
+        for cog_name, cog in (
+            self.bot.cogs.items()
+        ):
+
+            if isinstance(
+                cog,
+                MasterConfig
+            ):
+
+                continue
+
+            try:
+
+                report = self.build_cog_report(
+                    guild,
+                    cog_name,
+                    cog
+                )
+
+                reports.append(
+                    (
+                        cog_name,
+                        report
+                    )
+                )
+
+            except Exception as e:
+
+                traceback.print_exc()
+
+                reports.append(
+                    (
+                        cog_name,
+                        {
+
+                            "status": "❌",
+
+                            "message": (
+                                f"{type(e).__name__}: "
+                                f"{e}"
+                            ),
+
+                            "config": None,
+
+                            "commands": [],
+
+                            "filename": None
+                        }
+                    )
+                )
+
+        return reports
 
     # ========================================================
     # /REFRESH
     # ========================================================
 
     @app_commands.command(
-
         name="refresh",
-
         description=(
-            "Read and check all saved bot configurations."
+            "Check all bot systems and saved configuration."
         )
     )
     @app_commands.checks.has_permissions(
@@ -1385,10 +1951,6 @@ class Refresh(
         self,
         interaction: discord.Interaction
     ):
-
-        # ----------------------------------------------------
-        # Server only
-        # ----------------------------------------------------
 
         if interaction.guild is None:
 
@@ -1402,172 +1964,337 @@ class Refresh(
 
             return
 
-        # ----------------------------------------------------
-        # Defer
-        # ----------------------------------------------------
-
         await interaction.response.defer(
             ephemeral=True
         )
 
         guild = interaction.guild
 
-        print("")
-        print(
-            "========================================"
-        )
+        # ----------------------------------------------------
+        # Backup first
+        # ----------------------------------------------------
 
-        print(
-            "       MASTER CONFIG REFRESH"
-        )
+        try:
 
-        print(
-            "========================================"
-        )
+            await self.backup_now()
 
-        # ====================================================
-        # READ REAL JSON FILES
-        # ====================================================
-
-        config_results = (
-            self.read_all_config_files(
-                guild
-            )
-        )
-
-        # ====================================================
-        # CHECK LOADED COGS
-        # ====================================================
-
-        cog_results = []
-
-        for cog_name, cog in (
-            self.bot.cogs.items()
-        ):
-
-            # Don't display this Cog
-            if cog is self:
-                continue
-
-            if cog_name == "Refresh":
-                continue
+        except Exception as e:
 
             print(
-                f"🔄 Checking Cog: {cog_name}"
+                f"❌ Backup failed: {e}"
             )
 
-            runtime_info = (
-                await self.get_cog_runtime_info(
-                    cog,
-                    guild
+        # ----------------------------------------------------
+        # Reports
+        # ----------------------------------------------------
+
+        reports = self.build_reports(
+            guild
+        )
+
+        # ----------------------------------------------------
+        # Statistics
+        # ----------------------------------------------------
+
+        configured = 0
+
+        warnings = 0
+
+        errors = 0
+
+        not_configured = 0
+
+        info_only = 0
+
+        command_count = 0
+
+        for _, report in reports:
+
+            status = report.get(
+                "status"
+            )
+
+            if status == "✅":
+
+                configured += 1
+
+            elif status == "⚠️":
+
+                warnings += 1
+
+            elif status == "❌":
+
+                errors += 1
+
+            elif status == "⚪":
+
+                not_configured += 1
+
+            else:
+
+                info_only += 1
+
+            command_count += len(
+                report.get(
+                    "commands",
+                    []
                 )
             )
 
-            commands_list = (
-                self.get_commands_for_cog(
-                    cog
-                )
-            )
+        # ----------------------------------------------------
+        # Embeds
+        # ----------------------------------------------------
 
-            cog_results.append({
+        embeds = []
 
-                "name": cog_name,
+        current = discord.Embed(
 
-                "runtime": runtime_info,
-
-                "commands": commands_list
-            })
-
-        # ====================================================
-        # STATISTICS
-        # ====================================================
-
-        total_files = len(
-            config_results
-        )
-
-        configured_files = sum(
-
-            1
-
-            for result in config_results
-
-            if result[
-                "configured"
-            ]
-        )
-
-        error_files = sum(
-
-            1
-
-            for result in config_results
-
-            if result[
-                "error"
-            ]
-        )
-
-        total_cogs = len(
-            cog_results
-        )
-
-        total_commands = sum(
-
-            len(
-                result[
-                    "commands"
-                ]
-            )
-
-            for result in cog_results
-        )
-
-        # ====================================================
-        # OVERVIEW EMBED
-        # ====================================================
-
-        overview = discord.Embed(
-
-            title="🔄 Master Configuration Refresh",
+            title="🔄 BOT CONFIGURATION",
 
             description=(
 
-                f"**Server:** {guild.name}\n\n"
+                f"Server: **{guild.name}**\n\n"
 
-                "The bot has read the actual "
-                "configuration files from disk.\n\n"
+                "All loaded Cogs were checked "
+                "against their saved configuration."
+            ),
 
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
+            color=discord.Color.blurple()
+        )
 
-                f"📄 **JSON files found:** "
-                f"`{total_files}`\n"
+        field_count = 0
 
-                f"🟢 **Guild configurations found:** "
-                f"`{configured_files}`\n"
+        for cog_name, report in reports:
 
-                f"❌ **JSON errors:** "
-                f"`{error_files}`\n\n"
+            status = report.get(
+                "status",
+                "⚪"
+            )
 
-                f"📦 **Loaded Cogs:** "
-                f"`{total_cogs}`\n"
+            message = report.get(
+                "message",
+                "No information."
+            )
+
+            config = report.get(
+                "config"
+            )
+
+            commands_found = report.get(
+                "commands",
+                []
+            )
+
+            filename = report.get(
+                "filename"
+            )
+
+            # ------------------------------------------------
+            # Setup
+            # ------------------------------------------------
+
+            if config is not None:
+
+                config_lines = flatten_config(
+                    guild,
+                    config
+                )
+
+                if config_lines:
+
+                    setup_text = "\n".join(
+                        config_lines[:15]
+                    )
+
+                    if len(
+                        config_lines
+                    ) > 15:
+
+                        setup_text += (
+                            "\n..."
+                        )
+
+                else:
+
+                    setup_text = (
+                        "Configuration exists."
+                    )
+
+            else:
+
+                setup_text = (
+                    "No guild-specific configuration."
+                )
+
+            # ------------------------------------------------
+            # File
+            # ------------------------------------------------
+
+            if filename:
+
+                file_text = (
+                    f"📄 `{filename}`"
+                )
+
+            else:
+
+                file_text = ""
+
+            # ------------------------------------------------
+            # Commands
+            # ------------------------------------------------
+
+            if commands_found:
+
+                command_text = " ".join(
+
+                    f"`{command}`"
+
+                    for command
+                    in commands_found
+                )
+
+                if len(
+                    command_text
+                ) > 450:
+
+                    command_text = (
+                        command_text[:450]
+                        + " ..."
+                    )
+
+            else:
+
+                command_text = (
+                    "No registered commands."
+                )
+
+            # ------------------------------------------------
+            # Complete field
+            # ------------------------------------------------
+
+            value = (
+
+                f"{status} **{message}**\n"
+
+                f"{file_text}\n\n"
+
+                f"⚙️ **Setup:**\n"
+
+                f"{setup_text}\n\n"
+
+                f"🛠️ **Commands:**\n"
+
+                f"{command_text}"
+            )
+
+            # ------------------------------------------------
+            # Discord field limit
+            # ------------------------------------------------
+
+            if len(
+                value
+            ) > 1024:
+
+                value = (
+                    value[:1000]
+                    + "\n..."
+                )
+
+            current.add_field(
+
+                name=(
+                    f"📦 {cog_name}"
+                ),
+
+                value=value,
+
+                inline=False
+            )
+
+            field_count += 1
+
+            # ------------------------------------------------
+            # Discord max 25 fields
+            # ------------------------------------------------
+
+            if field_count >= 20:
+
+                embeds.append(
+                    current
+                )
+
+                current = discord.Embed(
+
+                    title=(
+                        "🔄 BOT CONFIGURATION "
+                        "— CONTINUED"
+                    ),
+
+                    color=discord.Color.blurple()
+                )
+
+                field_count = 0
+
+        # ----------------------------------------------------
+        # Final embed
+        # ----------------------------------------------------
+
+        if field_count:
+
+            embeds.append(
+                current
+            )
+
+        # ====================================================
+        # SUMMARY
+        # ====================================================
+
+        summary = discord.Embed(
+
+            title="📊 REFRESH SUMMARY",
+
+            description=(
+
+                f"📦 **Cogs checked:** "
+                f"`{len(reports)}`\n\n"
+
+                f"✅ **Configured:** "
+                f"`{configured}`\n"
+
+                f"⚠️ **Warnings:** "
+                f"`{warnings}`\n"
+
+                f"❌ **Errors:** "
+                f"`{errors}`\n"
+
+                f"⚪ **Not configured:** "
+                f"`{not_configured}`\n"
+
+                f"ℹ️ **Command-only:** "
+                f"`{info_only}`\n\n"
 
                 f"⚙️ **Commands detected:** "
-                f"`{total_commands}`"
+                f"`{command_count}`\n\n"
+
+                "💾 **Persistent backup:** "
+                "`Active`\n\n"
+
+                f"📁 **Storage:** "
+                f"`{PERSISTENT_DIR}`"
             ),
 
             color=(
-                discord.Color.green()
-                if error_files == 0
-                else discord.Color.orange()
-            ),
 
-            timestamp=datetime.now(
-                timezone.utc
+                discord.Color.green()
+
+                if errors == 0
+
+                else discord.Color.red()
             )
         )
 
-        overview.set_footer(
+        summary.set_footer(
 
             text=(
                 f"Requested by "
@@ -1575,532 +2302,11 @@ class Refresh(
             )
         )
 
-        await interaction.followup.send(
-
-            embed=overview,
-
-            ephemeral=True
-        )
-
-        # ====================================================
-        # SEND JSON CONFIGURATION REPORT
-        # ====================================================
-
-        if config_results:
-
-            current_text = (
-                "📂 **SAVED JSON CONFIGURATIONS**\n\n"
-            )
-
-            page = 1
-
-            for result in config_results:
-
-                report = (
-                    self.build_file_report(
-                        result,
-                        guild
-                    )
-                )
-
-                addition = (
-                    "\n\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n\n"
-                    + report
-                )
-
-                if (
-                    len(current_text)
-                    + len(addition)
-                    > 3900
-                ):
-
-                    embed = discord.Embed(
-
-                        title=(
-                            "📂 Saved Configuration"
-                            f" — Page {page}"
-                        ),
-
-                        description=current_text,
-
-                        color=discord.Color.blurple()
-                    )
-
-                    await interaction.followup.send(
-
-                        embed=embed,
-
-                        ephemeral=True
-                    )
-
-                    page += 1
-
-                    current_text = report
-
-                else:
-
-                    current_text += addition
-
-            if current_text:
-
-                embed = discord.Embed(
-
-                    title=(
-                        "📂 Saved Configuration"
-                        f" — Page {page}"
-                    ),
-
-                    description=current_text,
-
-                    color=discord.Color.blurple()
-                )
-
-                await interaction.followup.send(
-
-                    embed=embed,
-
-                    ephemeral=True
-                )
-
-        # ====================================================
-        # COG STATUS
-        # ====================================================
-
-        current_text = (
-            "📦 **LOADED COG STATUS**\n\n"
-        )
-
-        page = 1
-
-        for result in cog_results:
-
-            cog_name = result[
-                "name"
-            ]
-
-            runtime = result[
-                "runtime"
-            ]
-
-            commands_list = result[
-                "commands"
-            ]
-
-            # ------------------------------------------------
-            # Runtime status
-            # ------------------------------------------------
-
-            if runtime:
-
-                status = runtime.get(
-                    "status",
-                    "ℹ️"
-                )
-
-                message = runtime.get(
-                    "message",
-                    "No details."
-                )
-
-            else:
-
-                status = "📄"
-
-                message = (
-                    "Configuration is read "
-                    "directly from its JSON file."
-                )
-
-            # ------------------------------------------------
-            # Commands
-            # ------------------------------------------------
-
-            if commands_list:
-
-                command_text = "\n".join(
-
-                    f"`{command}`"
-
-                    for command in commands_list[:20]
-                )
-
-                if len(
-                    commands_list
-                ) > 20:
-
-                    command_text += (
-                        "\n`... more commands ...`"
-                    )
-
-            else:
-
-                command_text = (
-                    "No commands detected."
-                )
-
-            field = (
-
-                f"{status} {message}\n\n"
-
-                f"⚙️ **Commands:**\n"
-                f"{command_text}"
-            )
-
-            addition = (
-
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-
-                f"📦 **{cog_name}**\n"
-
-                f"{field}\n\n"
-            )
-
-            if (
-                len(current_text)
-                + len(addition)
-                > 3900
-            ):
-
-                embed = discord.Embed(
-
-                    title=(
-                        "📦 Loaded Cogs"
-                        f" — Page {page}"
-                    ),
-
-                    description=current_text,
-
-                    color=discord.Color.blurple()
-                )
-
-                await interaction.followup.send(
-
-                    embed=embed,
-
-                    ephemeral=True
-                )
-
-                page += 1
-
-                current_text = addition
-
-            else:
-
-                current_text += addition
-
-        if current_text.strip():
-
-            embed = discord.Embed(
-
-                title=(
-                    "📦 Loaded Cogs"
-                    f" — Page {page}"
-                ),
-
-                description=current_text,
-
-                color=discord.Color.blurple()
-            )
-
-            await interaction.followup.send(
-
-                embed=embed,
-
-                ephemeral=True
-            )
-
-        # ====================================================
-        # FINISH
-        # ====================================================
-
-        print(
-            "========================================"
-        )
-
-        print(
-            "       MASTER REFRESH COMPLETE"
-        )
-
-        print(
-            "========================================"
-        )
-
-    # ========================================================
-    # /CONFIGFILES
-    # ========================================================
-
-    @app_commands.command(
-
-        name="configfiles",
-
-        description=(
-            "Show all JSON configuration files found by the bot."
-        )
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def configfiles(
-        self,
-        interaction: discord.Interaction
-    ):
-
-        await interaction.response.defer(
-            ephemeral=True
-        )
-
-        files = find_config_files()
-
-        if not files:
-
-            await interaction.followup.send(
-
-                "❌ No JSON configuration files were found.",
-
-                ephemeral=True
-            )
-
-            return
-
-        lines = []
-
-        for filepath in files:
-
-            lines.append(
-                f"📄 `{filepath.name}`"
-            )
-
-        text = "\n".join(
-            lines
-        )
-
-        if len(text) > 3900:
-
-            text = (
-                text[:3900]
-                + "\n..."
-            )
-
-        embed = discord.Embed(
-
-            title="📂 Bot Configuration Files",
-
-            description=text,
-
-            color=discord.Color.blurple()
-        )
-
-        embed.set_footer(
-
-            text=(
-                f"{len(files)} JSON file(s) detected."
-            )
-        )
-
-        await interaction.followup.send(
-
-            embed=embed,
-
-            ephemeral=True
-        )
-
-    # ========================================================
-    # /CONFIGREAD
-    # ========================================================
-
-    @app_commands.command(
-
-        name="configread",
-
-        description=(
-            "Read one JSON configuration file."
-        )
-    )
-    @app_commands.describe(
-
-        filename=(
-            "Example: voice_config.json"
-        )
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def configread(
-        self,
-        interaction: discord.Interaction,
-        filename: str
-    ):
-
-        await interaction.response.defer(
-            ephemeral=True
-        )
-
-        # ----------------------------------------------------
-        # Security
-        # ----------------------------------------------------
-
-        filename = os.path.basename(
-            filename
-        )
-
-        filepath = (
-            CONFIG_ROOT
-            / filename
-        )
-
-        # ----------------------------------------------------
-        # File exists?
-        # ----------------------------------------------------
-
-        if not filepath.exists():
-
-            # Check Cogs folder
-            cogs_filepath = (
-                CONFIG_ROOT
-                / "cogs"
-                / filename
-            )
-
-            if cogs_filepath.exists():
-
-                filepath = cogs_filepath
-
-            else:
-
-                await interaction.followup.send(
-
-                    "❌ Configuration file not found:\n\n"
-                    f"`{filename}`",
-
-                    ephemeral=True
-                )
-
-                return
-
-        # ----------------------------------------------------
-        # Read
-        # ----------------------------------------------------
-
-        data, error = read_json_file(
-            filepath
-        )
-
-        if error:
-
-            await interaction.followup.send(
-
-                f"❌ Could not read `{filename}`.\n\n"
-                f"`{error}`",
-
-                ephemeral=True
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # Find guild configuration
-        # ----------------------------------------------------
-
-        guild_data = find_guild_config(
-
-            data,
-
-            interaction.guild.id
-        )
-
-        # ----------------------------------------------------
-        # Use guild data when available
-        # ----------------------------------------------------
-
-        if guild_data is not None:
-
-            display_data = guild_data
-
-            title = (
-                f"📄 {filename} "
-                "— This Server"
-            )
-
-        else:
-
-            display_data = data
-
-            title = (
-                f"📄 {filename}"
-            )
-
-        # ----------------------------------------------------
-        # Format
-        # ----------------------------------------------------
-
-        text = format_value(
-
-            display_data,
-
-            interaction.guild
-        )
-
-        if not text:
-
-            text = "`Empty configuration`"
-
-        # ----------------------------------------------------
-        # Split if needed
-        # ----------------------------------------------------
-
-        chunks = []
-
-        while len(text) > 3900:
-
-            chunk = text[:3900]
-
-            split_position = chunk.rfind(
-                "\n"
-            )
-
-            if split_position > 1000:
-
-                chunk = chunk[
-                    :split_position
-                ]
-
-            chunks.append(
-                chunk
-            )
-
-            text = text[
-                len(chunk):
-            ]
-
-        if text:
-
-            chunks.append(
-                text
-            )
-
         # ----------------------------------------------------
         # Send
         # ----------------------------------------------------
 
-        for index, chunk in enumerate(
-            chunks
-        ):
-
-            embed = discord.Embed(
-
-                title=(
-                    title
-                    if index == 0
-                    else
-                    f"{title} "
-                    f"— Page {index + 1}"
-                ),
-
-                description=chunk,
-
-                color=discord.Color.blurple()
-            )
+        for embed in embeds:
 
             await interaction.followup.send(
 
@@ -2109,8 +2315,15 @@ class Refresh(
                 ephemeral=True
             )
 
+        await interaction.followup.send(
+
+            embed=summary,
+
+            ephemeral=True
+        )
+
     # ========================================================
-    # REFRESH ERROR
+    # ERROR HANDLER
     # ========================================================
 
     @refresh.error
@@ -2135,64 +2348,8 @@ class Refresh(
             traceback.print_exc()
 
             message = (
-
-                "❌ An error occurred while "
-                "refreshing the configuration.\n\n"
-
+                "❌ `/refresh` failed:\n"
                 f"`{type(error).__name__}: {error}`"
-            )
-
-        try:
-
-            if interaction.response.is_done():
-
-                await interaction.followup.send(
-
-                    message,
-
-                    ephemeral=True
-                )
-
-            else:
-
-                await interaction.response.send_message(
-
-                    message,
-
-                    ephemeral=True
-                )
-
-        except Exception:
-
-            pass
-
-    # ========================================================
-    # CONFIGFILES ERROR
-    # ========================================================
-
-    @configfiles.error
-    async def configfiles_error(
-        self,
-        interaction,
-        error
-    ):
-
-        if isinstance(
-            error,
-            app_commands.errors.MissingPermissions
-        ):
-
-            message = (
-                "❌ You need **Administrator** "
-                "permission to use `/configfiles`."
-            )
-
-        else:
-
-            traceback.print_exc()
-
-            message = (
-                "❌ Configuration file error."
             )
 
         try:
@@ -2229,7 +2386,7 @@ async def setup(
 ):
 
     await bot.add_cog(
-        Refresh(bot)
+        MasterConfig(bot)
     )
 
     print(
