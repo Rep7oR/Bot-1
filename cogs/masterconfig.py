@@ -1,32 +1,12 @@
 # ============================================================
-# MASTER CONFIGURATION SYSTEM
-# SUPABASE / POSTGRESQL VERSION
-# ============================================================
-#
-# PURPOSE:
-#
-# 1. MasterConfig loads FIRST.
-# 2. Connects to Supabase PostgreSQL.
-# 3. Restores saved JSON configuration files.
-# 4. Other Cogs load AFTER restoration.
-# 5. Automatically discovers JSON configuration files.
-# 6. Automatically backs up JSON files to Supabase.
-# 7. New JSON files are automatically detected.
-# 8. /refresh shows configuration status.
-# 9. /dbstatus checks the database.
-# 10. /configcount shows saved configuration files.
-#
-# Existing Cogs do NOT need to be modified.
-#
+# MASTER CONFIG
+# Supabase PostgreSQL persistent configuration system
 # ============================================================
 
 import os
 import json
 import asyncio
-import socket
-import ssl
 import traceback
-from urllib.parse import urlsplit, unquote
 from datetime import datetime, timezone
 
 import asyncpg
@@ -42,10 +22,8 @@ from discord import app_commands
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# How often local JSON files are checked and backed up.
-BACKUP_INTERVAL = 15
+BACKUP_INTERVAL = 30
 
-# Directories that should never be scanned.
 SKIP_DIRECTORIES = {
     ".git",
     ".github",
@@ -59,30 +37,19 @@ SKIP_DIRECTORIES = {
 
 
 # ============================================================
-# GLOBAL LOCK
-# ============================================================
-
-config_lock = asyncio.Lock()
-
-
-# ============================================================
-# TIME
+# HELPERS
 # ============================================================
 
 def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
-# ============================================================
-# JSON HELPERS
-# ============================================================
-
 def read_json(path):
 
-    if not os.path.exists(path):
-        return None
-
     try:
+
+        if not os.path.exists(path):
+            return None
 
         with open(
             path,
@@ -95,7 +62,7 @@ def read_json(path):
     except Exception as e:
 
         print(
-            f"❌ Failed reading JSON "
+            f"❌ JSON read failed "
             f"{path}: {e}"
         )
 
@@ -139,7 +106,7 @@ def write_json(path, data):
     except Exception as e:
 
         print(
-            f"❌ Failed writing JSON "
+            f"❌ JSON write failed "
             f"{path}: {e}"
         )
 
@@ -147,28 +114,24 @@ def write_json(path, data):
 
 
 # ============================================================
-# FIND ALL JSON CONFIGURATION FILES
+# FIND JSON FILES
 # ============================================================
 
 def find_json_files():
 
-    files = []
+    result = []
 
-    root_directory = os.getcwd()
+    base = os.getcwd()
 
-    for root, directories, filenames in os.walk(
-        root_directory
-    ):
+    for root, dirs, files in os.walk(base):
 
-        # Remove directories that should not be scanned.
-        directories[:] = [
-            directory
-            for directory in directories
-            if directory not in SKIP_DIRECTORIES
-            and not directory.startswith(".")
+        dirs[:] = [
+            d for d in dirs
+            if d not in SKIP_DIRECTORIES
+            and not d.startswith(".")
         ]
 
-        for filename in filenames:
+        for filename in files:
 
             if not filename.lower().endswith(".json"):
                 continue
@@ -180,7 +143,7 @@ def find_json_files():
 
             relative_path = os.path.relpath(
                 full_path,
-                root_directory
+                base
             )
 
             relative_path = relative_path.replace(
@@ -188,28 +151,21 @@ def find_json_files():
                 "/"
             )
 
-            # Don't backup package/config files that are
-            # obviously not bot configuration.
-            if relative_path.startswith(
-                "package"
-            ):
+            # Ignore package files.
+            if relative_path in {
+                "package.json",
+                "package-lock.json"
+            }:
                 continue
 
-            if relative_path.startswith(
-                "node_modules/"
-            ):
-                continue
-
-            files.append(
+            result.append(
                 (
                     relative_path,
                     full_path
                 )
             )
 
-    return sorted(
-        files
-    )
+    return sorted(result)
 
 
 # ============================================================
@@ -228,16 +184,14 @@ class MasterConfig(commands.Cog):
 
         self.last_backup = None
 
-        self.backup_status = (
-            "Starting"
-        )
+        self.backup_status = "Starting"
 
         print(
             "=========================================="
         )
 
         print(
-            "🧠 MASTER CONFIG SYSTEM"
+            "🧠 MASTER CONFIG"
         )
 
         print(
@@ -249,7 +203,7 @@ class MasterConfig(commands.Cog):
         )
 
     # ========================================================
-    # COG LOAD
+    # LOAD
     # ========================================================
 
     async def cog_load(self):
@@ -261,12 +215,11 @@ class MasterConfig(commands.Cog):
         if not DATABASE_URL:
 
             print(
-                "❌ DATABASE_URL is not set."
+                "❌ DATABASE_URL is missing."
             )
 
             print(
-                "❌ Add DATABASE_URL to Render "
-                "Environment Variables."
+                "❌ Add DATABASE_URL in Render."
             )
 
             return
@@ -275,20 +228,20 @@ class MasterConfig(commands.Cog):
 
             await self.connect_database()
 
-            if self.database_ready:
+            if not self.database_ready:
+                return
 
-                await self.create_tables()
+            await self.create_tables()
 
-                # IMPORTANT:
-                # Restore BEFORE other Cogs load.
-                await self.restore_all_configs()
+            # Restore saved configuration BEFORE
+            # other cogs are loaded.
+            await self.restore_all_configs()
 
-                # Start automatic backup.
-                self.backup_loop.start()
+            self.backup_loop.start()
 
-                print(
-                    "✅ MasterConfig database system ready."
-                )
+            print(
+                "✅ MasterConfig database system ready."
+            )
 
         except Exception as e:
 
@@ -306,141 +259,42 @@ class MasterConfig(commands.Cog):
 
         try:
 
-            parsed = urlsplit(
-                DATABASE_URL
-            )
-
-            if parsed.scheme not in {
-                "postgresql",
-                "postgres"
-            }:
-
-                raise ValueError(
-                    "DATABASE_URL must start with "
-                    "postgresql://"
-                )
-
-            hostname = parsed.hostname
-
-            if not hostname:
-
-                raise ValueError(
-                    "DATABASE_URL does not contain "
-                    "a database hostname."
-                )
-
-            port = parsed.port or 5432
-
-            username = parsed.username
-
-            if not username:
-
-                raise ValueError(
-                    "DATABASE_URL does not contain "
-                    "a database username."
-                )
-
-            username = unquote(
-                username
-            )
-
-            password = parsed.password
-
-            if password is None:
-
-                raise ValueError(
-                    "DATABASE_URL does not contain "
-                    "a database password."
-                )
-
-            password = unquote(
-                password
-            )
-
-            database = (
-                parsed.path.lstrip("/")
-                or "postgres"
-            )
-
             print(
-                f"🔍 Database host: {hostname}"
-            )
-
-            print(
-                f"🔍 Database port: {port}"
-            )
-
-            print(
-                f"🔍 Database user: {username}"
+                "🔌 Connecting to Supabase..."
             )
 
             # ------------------------------------------------
-            # Resolve IPv4 manually.
+            # IMPORTANT
             #
-            # This avoids the hostname/IP parsing problem
-            # that your Render log is currently showing.
-            # ------------------------------------------------
-
-            ipv4_addresses = socket.getaddrinfo(
-                hostname,
-                port,
-                socket.AF_INET,
-                socket.SOCK_STREAM
-            )
-
-            if not ipv4_addresses:
-
-                raise RuntimeError(
-                    "Could not resolve database "
-                    "hostname to IPv4."
-                )
-
-            ipv4 = ipv4_addresses[0][4][0]
-
-            print(
-                f"🌐 Resolved database IPv4: {ipv4}"
-            )
-
-            # ------------------------------------------------
-            # SSL
+            # Pass the COMPLETE DATABASE_URL directly.
             #
-            # We connect to the resolved IPv4 address while
-            # allowing TLS without hostname verification.
-            # The Supabase pooler still provides encrypted
-            # PostgreSQL traffic.
-            # ------------------------------------------------
-
-            ssl_context = ssl.create_default_context()
-
-            ssl_context.check_hostname = False
-
-            ssl_context.verify_mode = (
-                ssl.CERT_NONE
-            )
-
-            # ------------------------------------------------
-            # Connect
+            # Do NOT:
+            # - resolve the hostname manually
+            # - convert it to an IP
+            # - use ipaddress.ip_address()
             # ------------------------------------------------
 
             self.pool = await asyncpg.create_pool(
-                host=ipv4,
-                port=port,
-                user=username,
-                password=password,
-                database=database,
+                dsn=DATABASE_URL,
                 min_size=1,
                 max_size=5,
-                ssl=ssl_context,
-                command_timeout=30
+                command_timeout=30,
+                ssl="require"
             )
 
             # Test connection.
 
             async with self.pool.acquire() as connection:
 
-                await connection.fetchval(
+                result = await connection.fetchval(
                     "SELECT 1"
                 )
+
+                if result != 1:
+
+                    raise RuntimeError(
+                        "Database test query failed."
+                    )
 
             self.database_ready = True
 
@@ -451,6 +305,14 @@ class MasterConfig(commands.Cog):
         except Exception as e:
 
             self.database_ready = False
+
+            if self.pool:
+
+                try:
+                    await self.pool.close()
+                except Exception:
+                    pass
+
             self.pool = None
 
             print(
@@ -460,7 +322,7 @@ class MasterConfig(commands.Cog):
             traceback.print_exc()
 
     # ========================================================
-    # CREATE DATABASE TABLES
+    # CREATE TABLE
     # ========================================================
 
     async def create_tables(self):
@@ -470,31 +332,28 @@ class MasterConfig(commands.Cog):
 
         async with self.pool.acquire() as connection:
 
-            await connection.execute("""
-                CREATE TABLE IF NOT EXISTS bot_config_files (
-
+            await connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS
+                bot_config_files
+                (
                     config_path TEXT PRIMARY KEY,
 
                     config_data JSONB NOT NULL,
 
-                    updated_at TIMESTAMPTZ
+                    updated_at
+                    TIMESTAMPTZ
                     DEFAULT NOW()
-
                 )
-            """)
-
-            await connection.execute("""
-                CREATE INDEX IF NOT EXISTS
-                idx_bot_config_files_updated
-                ON bot_config_files(updated_at)
-            """)
+                """
+            )
 
         print(
             "✅ bot_config_files table ready"
         )
 
     # ========================================================
-    # SAVE ONE CONFIGURATION FILE
+    # SAVE CONFIG
     # ========================================================
 
     async def save_config_file(
@@ -567,76 +426,12 @@ class MasterConfig(commands.Cog):
             return False
 
     # ========================================================
-    # RESTORE ONE CONFIGURATION FILE
-    # ========================================================
-
-    async def restore_config_file(
-        self,
-        relative_path
-    ):
-
-        if not self.pool:
-            return False
-
-        try:
-
-            async with self.pool.acquire() as connection:
-
-                row = await connection.fetchrow(
-                    """
-                    SELECT
-                        config_data
-
-                    FROM bot_config_files
-
-                    WHERE config_path = $1
-                    """,
-
-                    relative_path
-                )
-
-            if not row:
-
-                return False
-
-            full_path = os.path.join(
-                os.getcwd(),
-                relative_path
-            )
-
-            data = row[
-                "config_data"
-            ]
-
-            if write_json(
-                full_path,
-                data
-            ):
-
-                print(
-                    f"♻️ Restored: "
-                    f"{relative_path}"
-                )
-
-                return True
-
-        except Exception as e:
-
-            print(
-                f"❌ Failed restoring "
-                f"{relative_path}: {e}"
-            )
-
-        return False
-
-    # ========================================================
-    # RESTORE ALL CONFIGURATIONS
+    # RESTORE ALL
     # ========================================================
 
     async def restore_all_configs(self):
 
         if not self.pool:
-
             return
 
         print(
@@ -660,12 +455,14 @@ class MasterConfig(commands.Cog):
             if not rows:
 
                 print(
-                    "ℹ️ No previous database "
-                    "configuration found."
+                    "ℹ️ No previous configurations "
+                    "found in Supabase."
                 )
 
-                # First deployment:
-                # Save whatever JSON files already exist.
+                print(
+                    "💾 Creating first backup..."
+                )
+
                 await self.backup_all_configs(
                     silent=False
                 )
@@ -673,6 +470,8 @@ class MasterConfig(commands.Cog):
                 return
 
             restored = 0
+
+            database_paths = set()
 
             for row in rows:
 
@@ -683,6 +482,10 @@ class MasterConfig(commands.Cog):
                 data = row[
                     "config_data"
                 ]
+
+                database_paths.add(
+                    relative_path
+                )
 
                 full_path = os.path.join(
                     os.getcwd(),
@@ -707,14 +510,8 @@ class MasterConfig(commands.Cog):
             )
 
             # ------------------------------------------------
-            # Detect new JSON files that weren't previously
-            # stored in Supabase.
+            # Find new local JSON files.
             # ------------------------------------------------
-
-            existing_paths = {
-                row["config_path"]
-                for row in rows
-            }
 
             local_files = find_json_files()
 
@@ -722,7 +519,7 @@ class MasterConfig(commands.Cog):
 
             for relative_path, full_path in local_files:
 
-                if relative_path not in existing_paths:
+                if relative_path not in database_paths:
 
                     if await self.save_config_file(
                         relative_path,
@@ -732,7 +529,7 @@ class MasterConfig(commands.Cog):
                         new_files += 1
 
                         print(
-                            f"🆕 New configuration saved: "
+                            f"🆕 New config saved: "
                             f"{relative_path}"
                         )
 
@@ -746,13 +543,13 @@ class MasterConfig(commands.Cog):
         except Exception as e:
 
             print(
-                f"❌ Restore error: {e}"
+                f"❌ Configuration restore failed: {e}"
             )
 
             traceback.print_exc()
 
     # ========================================================
-    # BACKUP ALL CONFIGURATIONS
+    # BACKUP ALL
     # ========================================================
 
     async def backup_all_configs(
@@ -761,7 +558,6 @@ class MasterConfig(commands.Cog):
     ):
 
         if not self.pool:
-
             return 0
 
         files = find_json_files()
@@ -769,14 +565,6 @@ class MasterConfig(commands.Cog):
         saved = 0
 
         for relative_path, full_path in files:
-
-            # Skip master/config metadata files.
-            if relative_path in {
-                "package.json",
-                "package-lock.json"
-            }:
-
-                continue
 
             if await self.save_config_file(
                 relative_path,
@@ -800,17 +588,10 @@ class MasterConfig(commands.Cog):
             f"{saved} files backed up"
         )
 
-        if not silent:
-
-            print(
-                f"✅ Initial backup complete: "
-                f"{saved} files."
-            )
-
         return saved
 
     # ========================================================
-    # AUTOMATIC BACKUP LOOP
+    # AUTOMATIC BACKUP
     # ========================================================
 
     @tasks.loop(
@@ -819,32 +600,24 @@ class MasterConfig(commands.Cog):
     async def backup_loop(self):
 
         if not self.database_ready:
-
             return
 
         try:
 
-            async with config_lock:
-
-                count = await self.backup_all_configs(
-                    silent=True
-                )
+            count = await self.backup_all_configs(
+                silent=True
+            )
 
             print(
-                f"💾 Automatic backup: "
-                f"{count} JSON files"
+                f"💾 Auto-backup: "
+                f"{count} configuration files"
             )
 
         except Exception as e:
 
             print(
-                f"❌ Automatic backup error: "
-                f"{e}"
+                f"❌ Auto-backup failed: {e}"
             )
-
-    # ========================================================
-    # BACKUP LOOP BEFORE START
-    # ========================================================
 
     @backup_loop.before_loop
     async def before_backup_loop(self):
@@ -852,158 +625,12 @@ class MasterConfig(commands.Cog):
         await self.bot.wait_until_ready()
 
     # ========================================================
-    # GET ALL SAVED CONFIGS
-    # ========================================================
-
-    async def get_saved_configs(self):
-
-        if not self.pool:
-
-            return []
-
-        try:
-
-            async with self.pool.acquire() as connection:
-
-                rows = await connection.fetch(
-                    """
-                    SELECT
-                        config_path,
-                        updated_at
-
-                    FROM bot_config_files
-
-                    ORDER BY config_path
-                    """
-                )
-
-            return rows
-
-        except Exception as e:
-
-            print(
-                f"❌ Failed loading config list: "
-                f"{e}"
-            )
-
-            return []
-
-    # ========================================================
-    # PUBLIC API
-    #
-    # Other Cogs can use these later if needed.
-    # ========================================================
-
-    async def set_config(
-        self,
-        key,
-        value
-    ):
-
-        if not self.pool:
-            return False
-
-        try:
-
-            async with self.pool.acquire() as connection:
-
-                await connection.execute(
-                    """
-                    INSERT INTO bot_config_files
-                    (
-                        config_path,
-                        config_data,
-                        updated_at
-                    )
-
-                    VALUES
-                    (
-                        $1,
-                        $2::jsonb,
-                        NOW()
-                    )
-
-                    ON CONFLICT
-                    (
-                        config_path
-                    )
-
-                    DO UPDATE SET
-
-                        config_data =
-                        EXCLUDED.config_data,
-
-                        updated_at =
-                        NOW()
-                    """,
-
-                    key,
-
-                    json.dumps(
-                        value,
-                        ensure_ascii=False
-                    )
-                )
-
-            return True
-
-        except Exception as e:
-
-            print(
-                f"❌ set_config failed: {e}"
-            )
-
-            return False
-
-    async def get_config(
-        self,
-        key,
-        default=None
-    ):
-
-        if not self.pool:
-
-            return default
-
-        try:
-
-            async with self.pool.acquire() as connection:
-
-                row = await connection.fetchrow(
-                    """
-                    SELECT config_data
-
-                    FROM bot_config_files
-
-                    WHERE config_path = $1
-                    """,
-
-                    key
-                )
-
-            if not row:
-
-                return default
-
-            return row[
-                "config_data"
-            ]
-
-        except Exception as e:
-
-            print(
-                f"❌ get_config failed: {e}"
-            )
-
-            return default
-
-    # ========================================================
     # /DBSTATUS
     # ========================================================
 
     @app_commands.command(
         name="dbstatus",
-        description="Check the Supabase database connection."
+        description="Check the Supabase database."
     )
     @app_commands.checks.has_permissions(
         administrator=True
@@ -1016,8 +643,7 @@ class MasterConfig(commands.Cog):
         if not self.pool:
 
             await interaction.response.send_message(
-                "🔴 **Database Offline**\n\n"
-                "Supabase PostgreSQL is not connected.",
+                "🔴 **Database Offline**",
                 ephemeral=True
             )
 
@@ -1031,26 +657,26 @@ class MasterConfig(commands.Cog):
                     "SELECT 1"
                 )
 
-            count = await connection.fetchval(
-                """
-                SELECT COUNT(*)
-                FROM bot_config_files
-                """
-            )
+                count = await connection.fetchval(
+                    """
+                    SELECT COUNT(*)
+                    FROM bot_config_files
+                    """
+                )
 
             await interaction.response.send_message(
                 "🟢 **Database Connected**\n\n"
-                f"🗄️ Saved configuration files: "
-                f"`{count}`\n"
-                "💾 Automatic backup: `Active`",
+                f"💾 Saved configurations: `{count}`\n"
+                "☁️ Storage: `Supabase PostgreSQL`\n"
+                "🔄 Auto-backup: `Active`",
                 ephemeral=True
             )
 
         except Exception as e:
 
             await interaction.response.send_message(
-                "🔴 **Database Error**\n\n"
-                f"`{type(e).__name__}: {e}`",
+                f"🔴 **Database Error**\n\n"
+                f"`{e}`",
                 ephemeral=True
             )
 
@@ -1060,7 +686,7 @@ class MasterConfig(commands.Cog):
 
     @app_commands.command(
         name="configcount",
-        description="Show saved configuration count."
+        description="Show stored configuration count."
     )
     @app_commands.checks.has_permissions(
         administrator=True
@@ -1091,15 +717,14 @@ class MasterConfig(commands.Cog):
                 )
 
             await interaction.response.send_message(
-                f"💾 **Saved configurations:** "
-                f"`{count}`",
+                f"💾 **Stored configurations:** `{count}`",
                 ephemeral=True
             )
 
         except Exception as e:
 
             await interaction.response.send_message(
-                f"❌ Error: `{e}`",
+                f"❌ `{e}`",
                 ephemeral=True
             )
 
@@ -1109,7 +734,7 @@ class MasterConfig(commands.Cog):
 
     @app_commands.command(
         name="backup",
-        description="Manually backup all bot configurations."
+        description="Save all bot configuration files."
     )
     @app_commands.checks.has_permissions(
         administrator=True
@@ -1134,17 +759,14 @@ class MasterConfig(commands.Cog):
 
         try:
 
-            async with config_lock:
-
-                count = await self.backup_all_configs(
-                    silent=False
-                )
+            count = await self.backup_all_configs(
+                silent=False
+            )
 
             await interaction.followup.send(
                 "✅ **Backup Complete**\n\n"
-                f"💾 Configuration files saved: "
-                f"`{count}`\n"
-                "🗄️ Storage: `Supabase PostgreSQL`",
+                f"💾 Saved: `{count}` configuration files\n"
+                "☁️ Storage: `Supabase PostgreSQL`",
                 ephemeral=True
             )
 
@@ -1161,7 +783,7 @@ class MasterConfig(commands.Cog):
 
     @app_commands.command(
         name="refresh",
-        description="Check and display the complete bot setup."
+        description="Show the complete bot configuration."
     )
     @app_commands.checks.has_permissions(
         administrator=True
@@ -1176,17 +798,7 @@ class MasterConfig(commands.Cog):
         )
 
         # ----------------------------------------------------
-        # Database status
-        # ----------------------------------------------------
-
-        database_status = (
-            "🟢 Connected"
-            if self.database_ready
-            else "🔴 Offline"
-        )
-
-        # ----------------------------------------------------
-        # Cogs
+        # COGS
         # ----------------------------------------------------
 
         cogs = list(
@@ -1194,16 +806,16 @@ class MasterConfig(commands.Cog):
         )
 
         # ----------------------------------------------------
-        # Commands
+        # COMMANDS
         # ----------------------------------------------------
 
-        slash_commands = []
+        commands_list = []
 
         try:
 
             for command in self.bot.tree.walk_commands():
 
-                slash_commands.append(
+                commands_list.append(
                     "/" + command.qualified_name
                 )
 
@@ -1211,221 +823,64 @@ class MasterConfig(commands.Cog):
 
             pass
 
-        slash_commands = sorted(
-            set(slash_commands)
+        commands_list = sorted(
+            set(commands_list)
         )
 
         # ----------------------------------------------------
-        # JSON files
+        # LOCAL CONFIG FILES
         # ----------------------------------------------------
 
         local_files = find_json_files()
 
-        saved_configs = []
+        # ----------------------------------------------------
+        # DATABASE FILES
+        # ----------------------------------------------------
+
+        database_files = []
 
         if self.pool:
 
-            saved_configs = await self.get_saved_configs()
-
-        saved_paths = {
-            row["config_path"]
-            for row in saved_configs
-        }
-
-        # ----------------------------------------------------
-        # SUMMARY
-        # ----------------------------------------------------
-
-        configured = 0
-        not_configured = 0
-        warnings = 0
-        command_only = 0
-
-        cog_lines = []
-
-        for cog in cogs:
-
-            cog_name = cog.__class__.__name__
-
-            # Commands belonging to cog
-            cog_commands = []
-
             try:
 
-                for command in self.bot.tree.walk_commands():
+                async with self.pool.acquire() as connection:
 
-                    binding = getattr(
-                        command,
-                        "binding",
-                        None
+                    rows = await connection.fetch(
+                        """
+                        SELECT config_path
+                        FROM bot_config_files
+                        ORDER BY config_path
+                        """
                     )
 
-                    if binding is cog:
-
-                        cog_commands.append(
-                            "/" + command.qualified_name
-                        )
+                database_files = [
+                    row["config_path"]
+                    for row in rows
+                ]
 
             except Exception:
-
-                pass
-
-            cog_commands = sorted(
-                set(cog_commands)
-            )
-
-            # Search matching config files.
-            matching_files = []
-
-            for relative_path, full_path in local_files:
-
-                filename = os.path.basename(
-                    relative_path
-                ).lower()
-
-                cog_lower = cog_name.lower()
-
-                if (
-                    cog_lower in filename
-                    or filename.replace(
-                        "_config.json",
-                        ""
-                    ) in cog_lower
-                ):
-
-                    matching_files.append(
-                        relative_path
-                    )
-
-            if matching_files:
-
-                configured += 1
-
-                config_text = ", ".join(
-                    f"`{path}`"
-                    for path in matching_files
-                )
-
-                cog_lines.append(
-                    f"📦 **{cog_name}**\n"
-                    f"✅ Config: {config_text}\n"
-                    f"🛠️ Commands: "
-                    f"{', '.join(cog_commands) if cog_commands else 'None'}"
-                )
-
-            elif cog_commands:
-
-                command_only += 1
-
-                cog_lines.append(
-                    f"📦 **{cog_name}**\n"
-                    f"ℹ️ Command-only\n"
-                    f"🛠️ Commands: "
-                    f"{', '.join(cog_commands)}"
-                )
-
-            else:
-
-                not_configured += 1
-
-                cog_lines.append(
-                    f"📦 **{cog_name}**\n"
-                    f"⚪ No JSON configuration detected."
-                )
+                database_files = []
 
         # ----------------------------------------------------
-        # DATABASE WARNING
+        # COUNTS
         # ----------------------------------------------------
+
+        configured = len(database_files)
+
+        local_count = len(local_files)
+
+        warnings = 0
 
         if not self.database_ready:
 
             warnings += 1
 
         # ----------------------------------------------------
-        # Build embeds
+        # SUMMARY EMBED
         # ----------------------------------------------------
 
-        embeds = []
-
-        current = discord.Embed(
-            title="🔄 BOT CONFIGURATION",
-            color=discord.Color.blurple()
-        )
-
-        field_count = 0
-
-        for line in cog_lines:
-
-            if field_count >= 10:
-
-                embeds.append(
-                    current
-                )
-
-                current = discord.Embed(
-                    title=(
-                        "🔄 BOT CONFIGURATION "
-                        "— CONTINUED"
-                    ),
-                    color=discord.Color.blurple()
-                )
-
-                field_count = 0
-
-            current.add_field(
-                name="",
-                value=line,
-                inline=False
-            )
-
-            field_count += 1
-
-        if field_count:
-
-            embeds.append(
-                current
-            )
-
-        # ----------------------------------------------------
-        # Summary
-        # ----------------------------------------------------
-
-        summary = discord.Embed(
+        embed = discord.Embed(
             title="📊 REFRESH SUMMARY",
-            description=(
-                f"📦 **Cogs checked:** "
-                f"`{len(cogs)}`\n\n"
-
-                f"✅ **Configured:** "
-                f"`{configured}`\n"
-
-                f"⚠️ **Warnings:** "
-                f"`{warnings}`\n"
-
-                f"❌ **Errors:** "
-                f"`0`\n"
-
-                f"⚪ **Not configured:** "
-                f"`{not_configured}`\n"
-
-                f"ℹ️ **Command-only:** "
-                f"`{command_only}`\n\n"
-
-                f"⚙️ **Commands detected:** "
-                f"`{len(slash_commands)}`\n\n"
-
-                f"🗄️ **Database:** "
-                f"`{database_status}`\n\n"
-
-                f"💾 **Persistent backup:** "
-                f"`{'Active' if self.database_ready else 'Offline'}`\n\n"
-
-                f"📁 **JSON files detected:** "
-                f"`{len(local_files)}`\n\n"
-
-                f"☁️ **JSON files stored in Supabase:** "
-                f"`{len(saved_paths)}`"
-            ),
             color=(
                 discord.Color.green()
                 if self.database_ready
@@ -1433,39 +888,106 @@ class MasterConfig(commands.Cog):
             )
         )
 
-        summary.set_footer(
-            text=(
-                f"Requested by "
-                f"{interaction.user}"
-            )
+        embed.description = (
+            f"📦 **Cogs loaded:** "
+            f"`{len(cogs)}`\n\n"
+
+            f"⚙️ **Commands detected:** "
+            f"`{len(commands_list)}`\n\n"
+
+            f"💾 **Local JSON files:** "
+            f"`{local_count}`\n\n"
+
+            f"☁️ **Saved in Supabase:** "
+            f"`{configured}`\n\n"
+
+            f"🟢 **Database:** "
+            f"`{'Connected' if self.database_ready else 'Offline'}`\n\n"
+
+            f"🔄 **Automatic backup:** "
+            f"`{'Active' if self.database_ready else 'Offline'}`\n\n"
+
+            f"⚠️ **Warnings:** "
+            f"`{warnings}`"
         )
 
-        # ----------------------------------------------------
-        # Send configuration pages
-        # ----------------------------------------------------
-
-        for embed in embeds:
-
-            await interaction.followup.send(
-                embed=embed,
-                ephemeral=True
-            )
-
-        # ----------------------------------------------------
-        # Send summary
-        # ----------------------------------------------------
+        embed.set_footer(
+            text=f"Requested by {interaction.user}"
+        )
 
         await interaction.followup.send(
-            embed=summary,
+            embed=embed,
             ephemeral=True
         )
+
+        # ----------------------------------------------------
+        # DATABASE FILE LIST
+        # ----------------------------------------------------
+
+        if database_files:
+
+            # Discord embed field limit workaround.
+            chunks = []
+
+            current = []
+
+            for path in database_files:
+
+                current.append(
+                    f"☁️ `{path}`"
+                )
+
+                if len(current) >= 20:
+
+                    chunks.append(
+                        "\n".join(current)
+                    )
+
+                    current = []
+
+            if current:
+
+                chunks.append(
+                    "\n".join(current)
+                )
+
+            for index, chunk in enumerate(chunks):
+
+                page = discord.Embed(
+                    title=(
+                        "☁️ SAVED CONFIGURATIONS"
+                        + (
+                            f" — {index + 1}"
+                            if len(chunks) > 1
+                            else ""
+                        )
+                    ),
+                    description=chunk,
+                    color=discord.Color.blurple()
+                )
+
+                await interaction.followup.send(
+                    embed=page,
+                    ephemeral=True
+                )
+
+        else:
+
+            await interaction.followup.send(
+                "⚪ No configurations are currently "
+                "stored in Supabase.",
+                ephemeral=True
+            )
 
     # ========================================================
     # ERROR HANDLER
     # ========================================================
 
+    @dbstatus.error
+    @configcount.error
+    @backup.error
     @refresh.error
-    async def refresh_error(
+    async def command_error(
         self,
         interaction,
         error
@@ -1478,7 +1000,7 @@ class MasterConfig(commands.Cog):
 
             message = (
                 "❌ You need **Administrator** "
-                "permission to use `/refresh`."
+                "permission to use this command."
             )
 
         else:
@@ -1486,8 +1008,7 @@ class MasterConfig(commands.Cog):
             traceback.print_exc()
 
             message = (
-                "❌ `/refresh` failed:\n"
-                f"`{type(error).__name__}: {error}`"
+                f"❌ Error:\n`{error}`"
             )
 
         try:
@@ -1514,12 +1035,10 @@ class MasterConfig(commands.Cog):
     # UNLOAD
     # ========================================================
 
-    async def cog_unload(
-        self
-    ):
+    async def cog_unload(self):
 
         print(
-            "🛑 Stopping MasterConfig..."
+            "🛑 MasterConfig shutting down..."
         )
 
         try:
@@ -1529,17 +1048,21 @@ class MasterConfig(commands.Cog):
                 self.backup_loop.cancel()
 
         except Exception:
-
             pass
 
-        # Final backup before shutdown.
+        # Final backup.
 
         try:
 
             if self.pool:
 
-                await self.backup_all_configs(
+                count = await self.backup_all_configs(
                     silent=False
+                )
+
+                print(
+                    f"💾 Final backup: "
+                    f"{count} files"
                 )
 
         except Exception as e:
@@ -1548,7 +1071,7 @@ class MasterConfig(commands.Cog):
                 f"⚠️ Final backup failed: {e}"
             )
 
-        # Close database.
+        # Close pool.
 
         try:
 
@@ -1557,13 +1080,13 @@ class MasterConfig(commands.Cog):
                 await self.pool.close()
 
                 print(
-                    "🔌 PostgreSQL connection closed"
+                    "🔌 Database connection closed"
                 )
 
         except Exception as e:
 
             print(
-                f"⚠️ Database close error: {e}"
+                f"⚠️ Database close failed: {e}"
             )
 
 
@@ -1571,14 +1094,12 @@ class MasterConfig(commands.Cog):
 # SETUP
 # ============================================================
 
-async def setup(
-    bot
-):
+async def setup(bot):
 
     await bot.add_cog(
         MasterConfig(bot)
     )
 
     print(
-        "✅ MasterConfig cog loaded"
+        "📦 MasterConfig cog loaded"
     )
