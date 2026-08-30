@@ -1,1588 +1,2414 @@
-﻿import discord
-from discord.ext import commands, tasks
-from discord import app_commands
+﻿# import asyncio
+# import json
+# import os
 
-import asyncio
-import json
-import os
-import yt_dlp
+# import discord
+# from discord import app_commands
+# from discord.ext import commands, tasks
+# import yt_dlp
 
 
-# =========================================================
-# CONFIGURATION
-# =========================================================
+# # =========================================================
+# # CONFIG
+# # =========================================================
 
-CONFIG_FILE = "music_config.json"
+# CONFIG_FILE = "music_config.json"
 
-# ---------------------------------------------------------
-# MUSIC SOURCE
-#
-# Put a YouTube/live-stream/playlist URL here.
-#
-# IMPORTANT:
-# Use a source you are authorized to stream.
-# ---------------------------------------------------------
+# DEFAULT_VOLUME = 0.70
 
-MALAYALAM_SOURCE = os.getenv(
-    "MALAYALAM_SOURCE",
-    ""
-)
+# WATCHDOG_INTERVAL = 20
 
-# Default volume
-DEFAULT_VOLUME = 0.70
+# MUSIC_SOURCE = os.getenv("MALAYALAM_SOURCE", "").strip()
 
 # How often the watchdog checks the player
 WATCHDOG_SECONDS = 15
 
+# # =========================================================
+# # YT-DLP
+# # =========================================================
 
-# =========================================================
-# YT-DLP OPTIONS
-# =========================================================
+# YTDL_OPTIONS = {
+#     "format": "bestaudio/best",
+#     "quiet": True,
+#     "no_warnings": True,
+#     "noplaylist": False,
+#     "source_address": "0.0.0.0",
+# }
 
 YTDL_OPTIONS = {
 
-    "format": "bestaudio/best",
+# # =========================================================
+# # FFMPEG
+# # =========================================================
 
-    "quiet": True,
+# FFMPEG_BEFORE_OPTIONS = (
+#     "-reconnect 1 "
+#     "-reconnect_streamed 1 "
+#     "-reconnect_delay_max 5"
+# )
 
-    "no_warnings": True,
+# FFMPEG_OPTIONS = (
+#     "-vn "
+#     "-loglevel warning"
+# )
 
     "noplaylist": False,
 
-    "extract_flat": False,
+# # =========================================================
+# # CONFIG FILE FUNCTIONS
+# # =========================================================
 
-    "geo_bypass": True,
+# def load_music_config():
 
-    "source_address": "0.0.0.0",
+#     if not os.path.exists(CONFIG_FILE):
+#         return {}
 
-}
+#     try:
 
+#         with open(
+#             CONFIG_FILE,
+#             "r",
+#             encoding="utf-8"
+#         ) as f:
 
-# =========================================================
-# FFMPEG OPTIONS
-# =========================================================
+#             return json.load(f)
 
-FFMPEG_BEFORE_OPTIONS = (
-    "-reconnect 1 "
-    "-reconnect_streamed 1 "
-    "-reconnect_delay_max 5"
-)
+#     except Exception as e:
 
-FFMPEG_OPTIONS = (
-    "-vn "
-    "-loglevel warning"
-)
+#         print(
+#             f"❌ Failed to load music config: {e}"
+#         )
 
+#         return {}
 
 # =========================================================
 # LOAD / SAVE CONFIG
 # =========================================================
 
-def load_config():
+# def save_music_config(config):
 
-    if not os.path.exists(CONFIG_FILE):
+#     try:
+
+#         with open(
+#             CONFIG_FILE,
+#             "w",
+#             encoding="utf-8"
+#         ) as f:
+
+#             json.dump(
+#                 config,
+#                 f,
+#                 indent=4
+#             )
+
+#     except Exception as e:
+
+#         print(
+#             f"❌ Failed to save music config: {e}"
+#         )
+
         return {}
 
-    try:
+# # =========================================================
+# # MUSIC COG
+# # =========================================================
 
-        with open(
-            CONFIG_FILE,
-            "r",
-            encoding="utf-8"
-        ) as f:
+# class MusicSystem(commands.Cog):
 
-            return json.load(f)
+#     def __init__(self, bot):
 
-    except (
-        json.JSONDecodeError,
-        FileNotFoundError
-    ):
+#         self.bot = bot
 
-        return {}
+#         self.config = load_music_config()
 
-
-def save_config(config):
-
-    with open(
-        CONFIG_FILE,
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        json.dump(
-            config,
-            f,
-            indent=4
-        )
+#         self.players = {}
 
+#         self.connecting = set()
 
-# =========================================================
-# MUSIC SYSTEM
-# =========================================================
+#         self.music_watchdog.start()
 
-class MusicSystem(commands.Cog):
+#     # =====================================================
+#     # COG UNLOAD
+#     # =====================================================
 
-    def __init__(
-        self,
-        bot
-    ):
+#     def cog_unload(self):
 
-        self.bot = bot
+#         self.music_watchdog.cancel()
 
-        self.config = load_config()
+#     # =====================================================
+#     # GET PLAYER
+#     # =====================================================
 
-        # -------------------------------------------------
-        # Runtime state
-        # -------------------------------------------------
+#     def get_player(
+#         self,
+#         guild_id
+#     ):
 
-        self.players = {}
+#         return self.players.get(
+#             guild_id
+#         )
 
-        # {
-        #   guild_id: {
-        #       "voice_channel_id": ...,
-        #       "text_channel_id": ...,
-        #       "volume": 0.7,
-        #       "paused": False,
-        #       "title": "...",
-        #       "url": "..."
-        #   }
-        # }
+#     # =====================================================
+#     # GET CONFIG
+#     # =====================================================
 
-        # Start watchdog
-        self.music_watchdog.start()
+#     def get_guild_config(
+#         self,
+#         guild_id
+#     ):
 
-    # =====================================================
-    # CLEANUP
-    # =====================================================
+#         return self.config.get(
+#             str(guild_id)
+#         )
 
-    def cog_unload(self):
-
-        self.music_watchdog.cancel()
-
-    # =====================================================
-    # GET CONFIG
-    # =====================================================
-
-    def get_guild_config(
-        self,
-        guild_id
-    ):
-
-        return self.config.get(
-            str(guild_id)
-        )
+#     # =====================================================
+#     # /SETMUSIC
+#     # =====================================================
 
-    # =====================================================
-    # GET PLAYER
-    # =====================================================
-
-    def get_player(
-        self,
-        guild_id
-    ):
-
-        return self.players.get(
-            guild_id
-        )
-
-    # =====================================================
-    # /SETMUSIC
-    # =====================================================
-
-    @app_commands.command(
-        name="setmusic",
-        description="Set up the 24/7 Malayalam music player."
-    )
-    @app_commands.describe(
-        category="Category where the music channels will be created."
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def setmusic(
-        self,
-        interaction: discord.Interaction,
-        category: discord.CategoryChannel
-    ):
-
-        guild = interaction.guild
+#     @app_commands.command(
+#         name="setmusic",
+#         description="Create the 24/7 Malayalam music system."
+#     )
+#     @app_commands.describe(
+#         category="Category where the music channels will be created."
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def setmusic(
+#         self,
+#         interaction: discord.Interaction,
+#         category: discord.CategoryChannel
+#     ):
 
-        if guild is None:
+#         guild = interaction.guild
 
-            await interaction.response.send_message(
-                "❌ This command can only be used inside a server.",
-                ephemeral=True
-            )
-
-            return
+#         if guild is None:
 
-        if not MALAYALAM_SOURCE:
+#             await interaction.response.send_message(
+#                 "❌ This command can only be used in a server.",
+#                 ephemeral=True
+#             )
 
-            await interaction.response.send_message(
-                "❌ `MALAYALAM_SOURCE` is not configured.\n\n"
-                "Add your authorized music/live-stream source "
-                "to the environment before using `/setmusic`.",
-                ephemeral=True
-            )
+#             return
 
-            return
+#         # -------------------------------------------------
+#         # CHECK SOURCE
+#         # -------------------------------------------------
 
-        await interaction.response.defer(
-            ephemeral=True
-        )
+#         if not MUSIC_SOURCE:
 
-        # -------------------------------------------------
-        # If already configured
-        # -------------------------------------------------
+#             await interaction.response.send_message(
 
-        old_config = self.get_guild_config(
-            guild.id
-        )
+#                 "❌ `MALAYALAM_SOURCE` is not configured "
+#                 "in Render Environment Variables.",
 
-        if old_config:
+#                 ephemeral=True
+#             )
 
-            old_voice = guild.get_channel(
-                old_config.get(
-                    "voice_channel_id"
-                )
-            )
+#             return
 
-            old_text = guild.get_channel(
-                old_config.get(
-                    "text_channel_id"
-                )
-            )
+#         # -------------------------------------------------
+#         # CHECK EXISTING
+#         # -------------------------------------------------
 
-            await interaction.followup.send(
-                "⚠️ Music system is already configured.\n\n"
-                f"🎧 Voice: "
-                f"{old_voice.mention if old_voice else 'Missing'}\n"
-                f"💬 Controls: "
-                f"{old_text.mention if old_text else 'Missing'}",
-                ephemeral=True
-            )
+#         existing = self.get_guild_config(
+#             guild.id
+#         )
 
-            return
+#         if existing:
 
-        # -------------------------------------------------
-        # CREATE VOICE CHANNEL
-        # -------------------------------------------------
+#             voice = guild.get_channel(
+#                 existing.get(
+#                     "voice_channel_id"
+#                 )
+#             )
 
-        voice_overwrites = {
+#             text = guild.get_channel(
+#                 existing.get(
+#                     "text_channel_id"
+#                 )
+#             )
 
-            guild.default_role:
-                discord.PermissionOverwrite(
-                    view_channel=True,
-                    connect=True,
-                    speak=False
-                )
-        }
+#             await interaction.response.send_message(
 
-        try:
+#                 "⚠️ **Music system already exists.**\n\n"
 
-            voice_channel = await guild.create_voice_channel(
+#                 f"🎧 Voice: "
+#                 f"{voice.mention if voice else 'Missing'}\n"
 
-                name="Malayalam Music 🎵",
+#                 f"💬 Controls: "
+#                 f"{text.mention if text else 'Missing'}\n\n"
 
-                category=category,
+#                 "Use `/musicsetup remove` first.",
 
-                overwrites=voice_overwrites,
+#                 ephemeral=True
+#             )
 
-                reason="24/7 Malayalam music system"
-            )
+#             return
 
-        except discord.Forbidden:
+#         await interaction.response.defer(
+#             ephemeral=True
+#         )
 
-            await interaction.followup.send(
-                "❌ I cannot create the music voice channel.\n"
-                "Give the bot **Manage Channels** permission.",
-                ephemeral=True
-            )
+#         print("")
+#         print("=" * 60)
+#         print("🎵 MUSIC SETUP")
+#         print("=" * 60)
+#         print(f"Server: {guild.name}")
+#         print(f"Category: {category.name}")
 
-            return
+#         # =================================================
+#         # VOICE PERMISSIONS
+#         # =================================================
 
-        # -------------------------------------------------
-        # CREATE TEXT CHANNEL
-        # -------------------------------------------------
+#         voice_overwrites = {
 
-        text_overwrites = {
+#             guild.default_role:
+#                 discord.PermissionOverwrite(
+#                     view_channel=True,
+#                     connect=True,
+#                     speak=False
+#                 )
+#         }
 
-            guild.default_role:
-                discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=False,
-                    read_message_history=True
-                )
-        }
+#         # =================================================
+#         # CREATE VOICE
+#         # =================================================
 
-        try:
+#         try:
 
-            text_channel = await guild.create_text_channel(
+#             voice_channel = await guild.create_voice_channel(
 
-                name="music-controls",
+#                 name="Malayalam Music 🎵",
 
-                category=category,
+#                 category=category,
 
-                overwrites=text_overwrites,
+#                 overwrites=voice_overwrites,
 
-                topic=(
-                    "24/7 Malayalam Music Player"
-                ),
+#                 reason="24/7 Malayalam Music"
+#             )
 
-                reason="24/7 Malayalam music controls"
-            )
+#             print(
+#                 f"✅ Voice created: "
+#                 f"{voice_channel.name}"
+#             )
 
-        except discord.Forbidden:
+#         except Exception as e:
 
-            try:
+#             print(
+#                 f"❌ Voice channel error: "
+#                 f"{type(e).__name__}: {e}"
+#             )
 
-                await voice_channel.delete(
-                    reason="Music control channel creation failed"
-                )
+#             await interaction.followup.send(
 
-            except:
-                pass
+#                 f"❌ Could not create music voice channel.\n\n"
+#                 f"`{type(e).__name__}: {e}`",
 
-            await interaction.followup.send(
-                "❌ I could not create the music control channel.",
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        # -------------------------------------------------
-        # SAVE CONFIG
-        # -------------------------------------------------
+#         # =================================================
+#         # TEXT PERMISSIONS
+#         # =================================================
 
-        self.config[
-            str(guild.id)
-        ] = {
+#         text_overwrites = {
 
-            "category_id": category.id,
+#             guild.default_role:
+#                 discord.PermissionOverwrite(
+#                     view_channel=True,
+#                     send_messages=False,
+#                     read_message_history=True
+#                 )
+#         }
 
-            "voice_channel_id": voice_channel.id,
+#         # =================================================
+#         # CREATE CONTROL CHANNEL
+#         # =================================================
 
-            "text_channel_id": text_channel.id
-        }
+#         try:
 
-        save_config(
-            self.config
-        )
+#             text_channel = await guild.create_text_channel(
 
-        # -------------------------------------------------
-        # CREATE PLAYER STATE
-        # -------------------------------------------------
+#                 name="music-controls",
 
-        self.players[
-            guild.id
-        ] = {
+#                 category=category,
 
-            "voice_channel_id": voice_channel.id,
+#                 overwrites=text_overwrites,
 
-            "text_channel_id": text_channel.id,
+#                 topic="24/7 Malayalam Music Controls",
 
-            "volume": DEFAULT_VOLUME,
+#                 reason="24/7 Malayalam Music"
+#             )
 
-            "paused": False,
+#             print(
+#                 f"✅ Control channel created: "
+#                 f"{text_channel.name}"
+#             )
 
-            "title": "Starting Malayalam Music...",
+#         except Exception as e:
 
-            "source_url": MALAYALAM_SOURCE,
+#             print(
+#                 f"❌ Text channel error: {e}"
+#             )
 
-            "message_id": None,
+#             try:
+#                 await voice_channel.delete()
+#             except:
+#                 pass
 
-            "starting": False
-        }
+#             await interaction.followup.send(
 
-        # -------------------------------------------------
-        # SEND PLAYER PANEL
-        # -------------------------------------------------
+#                 f"❌ Could not create music control channel.\n\n"
+#                 f"`{type(e).__name__}: {e}`",
 
-        message = await self.send_player_panel(
-            guild
-        )
+#                 ephemeral=True
+#             )
 
-        if message:
+#             return
 
-            self.players[
-                guild.id
-            ]["message_id"] = message.id
+#         # =================================================
+#         # SAVE CONFIG
+#         # =================================================
 
-        # -------------------------------------------------
-        # CONNECT TO VOICE
-        # -------------------------------------------------
+#         self.config[
+#             str(guild.id)
+#         ] = {
 
-        try:
+#             "category_id":
+#                 category.id,
 
-            await self.connect_and_play(
-                guild
-            )
+#             "voice_channel_id":
+#                 voice_channel.id,
 
-        except Exception as e:
+#             "text_channel_id":
+#                 text_channel.id
+#         }
 
-            print(
-                f"❌ Music startup error: {e}"
-            )
+#         save_music_config(
+#             self.config
+#         )
 
-        # -------------------------------------------------
-        # RESPONSE
-        # -------------------------------------------------
+#         # =================================================
+#         # PLAYER DATA
+#         # =================================================
 
-        await interaction.followup.send(
+#         self.players[
+#             guild.id
+#         ] = {
 
-            f"✅ **24/7 Malayalam Music System Created**\n\n"
+#             "voice_channel_id":
+#                 voice_channel.id,
 
-            f"🎧 **Voice:** {voice_channel.mention}\n"
+#             "text_channel_id":
+#                 text_channel.id,
 
-            f"💬 **Controls:** {text_channel.mention}\n\n"
+#             "message_id":
+#                 None,
 
-            "The bot will remain in the voice channel "
-            "and automatically recover the stream if it "
-            "disconnects or the stream expires.",
+#             "volume":
+#                 DEFAULT_VOLUME,
 
-            ephemeral=True
-        )
+#             "paused":
+#                 False,
 
-    # =====================================================
-    # CONNECT + PLAY
-    # =====================================================
+#             "starting":
+#                 False,
 
-    async def connect_and_play(
-        self,
-        guild: discord.Guild
-    ):
+#             "title":
+#                 "Connecting...",
 
-        player = self.players.get(
-            guild.id
-        )
+#             "url":
+#                 MUSIC_SOURCE
+#         }
 
-        if not player:
-            return
+#         # =================================================
+#         # SEND CONTROL PANEL
+#         # =================================================
 
-        voice_channel = guild.get_channel(
-            player["voice_channel_id"]
-        )
+#         panel = await self.send_panel(
+#             guild
+#         )
 
-        if not voice_channel:
-            return
+#         if panel:
 
-        # -------------------------------------------------
-        # CONNECT
-        # -------------------------------------------------
+#             self.players[
+#                 guild.id
+#             ]["message_id"] = panel.id
 
-        voice_client = guild.voice_client
+#         # =================================================
+#         # CONNECT
+#         # =================================================
 
-        if voice_client:
+#         connected = await self.connect_to_voice(
+#             guild
+#         )
 
-            if not voice_client.is_connected():
+#         if connected:
 
-                try:
+#             await interaction.followup.send(
 
-                    await voice_client.connect(
-                        reconnect=True
-                    )
+#                 "✅ **Malayalam Music System Started!**\n\n"
 
-                except Exception:
+#                 f"🎧 Voice: {voice_channel.mention}\n"
+#                 f"💬 Controls: {text_channel.mention}\n\n"
 
-                    voice_client = None
+#                 "🎵 Music is now running.\n"
+#                 "🔄 Automatic reconnection is enabled.",
 
-            elif voice_client.channel.id != voice_channel.id:
+#                 ephemeral=True
+#             )
 
-                try:
+#         else:
 
-                    await voice_client.move_to(
-                        voice_channel
-                    )
+#             await interaction.followup.send(
 
-                except Exception:
-                    pass
+#                 "⚠️ **Music channels created, "
+#                 "but voice connection failed.**\n\n"
 
-        if not voice_client:
+#                 f"🎧 Voice: {voice_channel.mention}\n"
+#                 f"💬 Controls: {text_channel.mention}\n\n"
 
-            try:
+#                 "The watchdog will continue trying.\n\n"
 
-                voice_client = await voice_channel.connect(
-                    reconnect=True
-                )
+#                 "Use `/voicetest` to diagnose the voice connection.",
 
-            except Exception as e:
+#                 ephemeral=True
+#             )
 
-                print(
-                    f"❌ Could not connect to music VC "
-                    f"{guild.name}: {e}"
-                )
+#     # =====================================================
+#     # MUSIC SETUP GROUP
+#     # =====================================================
 
-                return
+#     musicsetup = app_commands.Group(
 
-        # -------------------------------------------------
-        # DON'T RESTART IF ALREADY PLAYING
-        # -------------------------------------------------
+#         name="musicsetup",
 
-        if voice_client.is_playing():
+#         description="Manage the music system."
+#     )
 
-            return
+#     # =====================================================
+#     # /MUSICSETUP REMOVE
+#     # =====================================================
 
-        if voice_client.is_paused():
+#     @musicsetup.command(
+#         name="remove",
+#         description="Remove the complete music system."
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def musicsetup_remove(
+#         self,
+#         interaction: discord.Interaction
+#     ):
 
-            return
+#         guild = interaction.guild
 
-        # -------------------------------------------------
-        # START STREAM
-        # -------------------------------------------------
+#         if guild is None:
 
-        await self.start_stream(
-            guild,
-            voice_client
-        )
+#             await interaction.response.send_message(
+#                 "❌ Server only.",
+#                 ephemeral=True
+#             )
 
-    # =====================================================
-    # GET STREAM
-    # =====================================================
+#             return
 
-    async def extract_stream(
-        self,
-        source
-    ):
+#         await interaction.response.defer(
+#             ephemeral=True
+#         )
 
-        loop = asyncio.get_running_loop()
+#         removed = await self.remove_system(
+#             guild
+#         )
 
-        def extract():
+#         if removed:
 
-            with yt_dlp.YoutubeDL(
-                YTDL_OPTIONS
-            ) as ydl:
+#             await interaction.followup.send(
 
-                info = ydl.extract_info(
-                    source,
-                    download=False
-                )
+#                 "🗑️ **Music System Removed**\n\n"
 
-                if not info:
-                    return None
+#                 "✅ Bot disconnected\n"
+#                 "✅ Voice channel deleted\n"
+#                 "✅ Control channel deleted\n"
+#                 "✅ Configuration deleted\n"
+#                 "✅ Player data cleared\n\n"
 
-                # -------------------------------------------------
-                # Playlist / search results
-                # -------------------------------------------------
+#                 "You can now use `/setmusic` again.",
 
-                if "entries" in info:
+#                 ephemeral=True
+#             )
 
-                    entries = [
-                        entry
-                        for entry in info["entries"]
-                        if entry
-                    ]
+#         else:
 
-                    if not entries:
-                        return None
+#             await interaction.followup.send(
 
-                    # Pick the first available item.
-                    info = entries[0]
+#                 "ℹ️ No music system was configured.",
 
-                return {
+#                 ephemeral=True
+#             )
 
-                    "title": info.get(
-                        "title",
-                        "Malayalam Music"
-                    ),
+#     # =====================================================
+#     # REMOVE SYSTEM
+#     # =====================================================
 
-                    "stream_url": info.get(
-                        "url"
-                    ),
+#     async def remove_system(
+#         self,
+#         guild
+#     ):
 
-                    "webpage_url": info.get(
-                        "webpage_url",
-                        source
-                    )
-                }
+#         guild_id = guild.id
 
-        return await loop.run_in_executor(
-            None,
-            extract
-        )
+#         config = self.config.get(
+#             str(guild_id)
+#         )
 
-    # =====================================================
-    # START STREAM
-    # =====================================================
+#         player = self.players.get(
+#             guild_id
+#         )
 
-    async def start_stream(
-        self,
-        guild,
-        voice_client
-    ):
+#         if not config and not player:
 
-        player = self.players.get(
-            guild.id
-        )
+#             return False
 
-        if not player:
-            return
+#         # -------------------------------------------------
+#         # DISCONNECT
+#         # -------------------------------------------------
 
-        if player.get(
-            "starting",
-            False
-        ):
+#         voice_client = guild.voice_client
 
-            return
+#         if voice_client:
 
-        player["starting"] = True
+#             try:
 
-        try:
+#                 if voice_client.is_playing():
 
-            # -------------------------------------------------
-            # Extract fresh URL
-            # -------------------------------------------------
+#                     voice_client.stop()
 
-            data = await self.extract_stream(
-                MALAYALAM_SOURCE
-            )
+#             except:
+#                 pass
 
-            if not data:
+#             try:
 
-                print(
-                    f"❌ No stream found for {guild.name}"
-                )
+#                 await voice_client.disconnect(
+#                     force=True
+#                 )
 
-                return
+#             except Exception as e:
 
-            stream_url = data.get(
-                "stream_url"
-            )
+#                 print(
+#                     f"⚠️ Disconnect error: {e}"
+#                 )
 
-            if not stream_url:
+#         # -------------------------------------------------
+#         # CHANNEL IDS
+#         # -------------------------------------------------
 
-                print(
-                    f"❌ Stream URL unavailable for "
-                    f"{guild.name}"
-                )
+#         voice_id = None
+#         text_id = None
 
-                return
+#         if config:
 
-            title = data.get(
-                "title",
-                "Malayalam Music"
-            )
+#             voice_id = config.get(
+#                 "voice_channel_id"
+#             )
 
-            player["title"] = title
+#             text_id = config.get(
+#                 "text_channel_id"
+#             )
 
-            player["webpage_url"] = data.get(
-                "webpage_url",
-                MALAYALAM_SOURCE
-            )
+#         if player:
 
-            player["paused"] = False
+#             voice_id = (
+#                 voice_id
+#                 or player.get(
+#                     "voice_channel_id"
+#                 )
+#             )
 
-            # -------------------------------------------------
-            # Create FFmpeg source
-            # -------------------------------------------------
+#             text_id = (
+#                 text_id
+#                 or player.get(
+#                     "text_channel_id"
+#                 )
+#             )
 
-            ffmpeg_source = discord.FFmpegPCMAudio(
+#         # -------------------------------------------------
+#         # DELETE TEXT
+#         # -------------------------------------------------
 
-                stream_url,
+#         if text_id:
 
-                before_options=(
-                    FFMPEG_BEFORE_OPTIONS
-                ),
+#             channel = guild.get_channel(
+#                 text_id
+#             )
 
-                options=(
-                    FFMPEG_OPTIONS
-                )
-            )
+#             if channel:
 
-            volume_source = discord.PCMVolumeTransformer(
-                ffmpeg_source,
-                volume=player.get(
-                    "volume",
-                    DEFAULT_VOLUME
-                )
-            )
+#                 try:
 
-            # -------------------------------------------------
-            # Playback callback
-            # -------------------------------------------------
+#                     await channel.delete(
+#                         reason="Music system removed"
+#                     )
 
-            def playback_finished(error):
+#                     print(
+#                         "🗑️ Deleted music control channel."
+#                     )
 
-                if error:
+#                 except Exception as e:
 
-                    print(
-                        f"⚠️ Playback error "
-                        f"in {guild.name}: {error}"
-                    )
+#                     print(
+#                         f"⚠️ Text deletion error: {e}"
+#                     )
 
-                asyncio.run_coroutine_threadsafe(
+#         # -------------------------------------------------
+#         # DELETE VOICE
+#         # -------------------------------------------------
 
-                    self.stream_finished(
-                        guild.id
-                    ),
+#         if voice_id:
 
-                    self.bot.loop
-                )
+#             channel = guild.get_channel(
+#                 voice_id
+#             )
 
-            # -------------------------------------------------
-            # PLAY
-            # -------------------------------------------------
+#             if channel:
 
-            voice_client.play(
-                volume_source,
-                after=playback_finished
-            )
+#                 try:
 
-            print(
-                f"🎵 Playing in {guild.name}: "
-                f"{title}"
-            )
+#                     await channel.delete(
+#                         reason="Music system removed"
+#                     )
 
-            await self.update_player_panel(
-                guild
-            )
+#                     print(
+#                         "🗑️ Deleted music voice channel."
+#                     )
 
-        except Exception as e:
+#                 except Exception as e:
 
-            print(
-                f"❌ Stream error in {guild.name}: {e}"
-            )
+#                     print(
+#                         f"⚠️ Voice deletion error: {e}"
+#                     )
 
-        finally:
+#         # -------------------------------------------------
+#         # CLEAR DATA
+#         # -------------------------------------------------
 
-            player["starting"] = False
+#         self.config.pop(
+#             str(guild_id),
+#             None
+#         )
 
-    # =====================================================
-    # STREAM FINISHED
-    # =====================================================
+#         self.players.pop(
+#             guild_id,
+#             None
+#         )
 
-    async def stream_finished(
-        self,
-        guild_id
-    ):
+#         self.connecting.discard(
+#             guild_id
+#         )
 
-        await asyncio.sleep(2)
+#         save_music_config(
+#             self.config
+#         )
 
-        guild = self.bot.get_guild(
-            guild_id
-        )
+#         return True
 
-        if not guild:
-            return
+#     # =====================================================
+#     # /VOICETEST
+#     # =====================================================
 
-        player = self.players.get(
-            guild_id
-        )
+#     @app_commands.command(
+#         name="voicetest",
+#         description="Test the Discord voice connection."
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def voicetest(
+#         self,
+#         interaction: discord.Interaction
+#     ):
 
-        if not player:
-            return
+#         guild = interaction.guild
 
-        # If paused, don't restart.
-        if player.get(
-            "paused",
-            False
-        ):
-            return
+#         if guild is None:
 
-        voice_client = guild.voice_client
+#             await interaction.response.send_message(
+#                 "❌ Server only.",
+#                 ephemeral=True
+#             )
 
-        if not voice_client:
-            return
+#             return
 
-        if voice_client.is_playing():
-            return
+#         config = self.get_guild_config(
+#             guild.id
+#         )
 
-        # Refresh the stream
-        await self.start_stream(
-            guild,
-            voice_client
-        )
+#         if not config:
 
-    # =====================================================
-    # WATCHDOG
-    # =====================================================
+#             await interaction.response.send_message(
 
-    @tasks.loop(
-        seconds=WATCHDOG_SECONDS
-    )
-    async def music_watchdog(self):
+#                 "❌ Music system is not configured.\n"
+#                 "Run `/setmusic` first.",
 
-        for guild_id in list(
-            self.players.keys()
-        ):
+#                 ephemeral=True
+#             )
 
-            try:
+#             return
 
-                guild = self.bot.get_guild(
-                    guild_id
-                )
+#         channel = guild.get_channel(
+#             config.get(
+#                 "voice_channel_id"
+#             )
+#         )
 
-                if not guild:
-                    continue
+#         if channel is None:
 
-                player = self.players.get(
-                    guild_id
-                )
+#             await interaction.response.send_message(
 
-                if not player:
-                    continue
+#                 "❌ Music voice channel does not exist.",
 
-                voice_channel = guild.get_channel(
-                    player["voice_channel_id"]
-                )
+#                 ephemeral=True
+#             )
 
-                if not voice_channel:
-                    continue
+#             return
 
-                voice_client = guild.voice_client
+#         await interaction.response.defer(
+#             ephemeral=True
+#         )
 
-                # -------------------------------------------------
-                # Reconnect if disconnected
-                # -------------------------------------------------
+#         print("")
+#         print("=" * 70)
+#         print("🎧 VOICE CONNECTION TEST")
+#         print("=" * 70)
 
-                if not voice_client:
+#         print(
+#             f"Server: {guild.name}"
+#         )
 
-                    print(
-                        f"🔄 Reconnecting music bot "
-                        f"to {guild.name}"
-                    )
+#         print(
+#             f"Guild ID: {guild.id}"
+#         )
 
-                    try:
+#         print(
+#             f"Voice Channel: {channel.name}"
+#         )
 
-                        voice_client = await voice_channel.connect(
-                            reconnect=True
-                        )
+#         print(
+#             f"Voice Channel ID: {channel.id}"
+#         )
 
-                    except Exception as e:
+#         print(
+#             f"discord.py: {discord.__version__}"
+#         )
 
-                        print(
-                            f"❌ Reconnect failed: {e}"
-                        )
+#         # -------------------------------------------------
+#         # CHECK PYNACL
+#         # -------------------------------------------------
 
-                        continue
+#         try:
 
-                elif not voice_client.is_connected():
+#             import nacl
 
-                    try:
+#             print(
+#                 f"✅ PyNaCl: "
+#                 f"{getattr(nacl, '__version__', 'installed')}"
+#             )
 
-                        await voice_client.disconnect(
-                            force=True
-                        )
+#         except Exception as e:
 
-                    except:
-                        pass
+#             print(
+#                 f"❌ PyNaCl: {e}"
+#             )
 
-                    try:
+#         # -------------------------------------------------
+#         # CHECK DAVEY
+#         # -------------------------------------------------
 
-                        voice_client = await voice_channel.connect(
-                            reconnect=True
-                        )
+#         try:
 
-                    except:
-                        continue
+#             import davey
 
-                # -------------------------------------------------
-                # Start again if player stopped
-                # -------------------------------------------------
+#             print(
+#                 f"✅ davey: "
+#                 f"{getattr(davey, '__version__', 'installed')}"
+#             )
 
-                if (
-                    not voice_client.is_playing()
-                    and not voice_client.is_paused()
-                    and not player.get(
-                        "starting",
-                        False
-                    )
-                ):
+#         except Exception as e:
 
-                    await self.start_stream(
-                        guild,
-                        voice_client
-                    )
+#             print(
+#                 f"❌ davey: {e}"
+#             )
 
-            except Exception as e:
+#         print(
+#             f"Voice States Intent: "
+#             f"{self.bot.intents.voice_states}"
+#         )
 
-                print(
-                    f"⚠️ Music watchdog error: {e}"
-                )
+#         try:
 
-    # =====================================================
-    # WATCHDOG READY
-    # =====================================================
+#             # -------------------------------------------------
+#             # DISCONNECT OLD CONNECTION
+#             # -------------------------------------------------
 
-    @music_watchdog.before_loop
-    async def before_music_watchdog(
-        self
-    ):
+#             old_client = guild.voice_client
 
-        await self.bot.wait_until_ready()
+#             if old_client:
 
-        # Restore configured players after bot restart
-        await self.restore_players()
+#                 print(
+#                     "⚠️ Disconnecting old voice client..."
+#                 )
 
-    # =====================================================
-    # RESTORE AFTER RESTART
-    # =====================================================
+#                 try:
 
-    async def restore_players(self):
+#                     await old_client.disconnect(
+#                         force=True
+#                     )
 
-        await asyncio.sleep(5)
+#                 except:
+#                     pass
 
-        for guild_id, config in list(
-            self.config.items()
-        ):
+#                 await asyncio.sleep(
+#                     3
+#                 )
 
-            try:
+#             # -------------------------------------------------
+#             # CONNECT
+#             # -------------------------------------------------
 
-                guild = self.bot.get_guild(
-                    int(guild_id)
-                )
+#             print(
+#                 "🔌 Connecting..."
+#             )
 
-                if not guild:
-                    continue
+#             voice_client = await channel.connect(
 
-                voice_channel = guild.get_channel(
-                    config.get(
-                        "voice_channel_id"
-                    )
-                )
+#                 timeout=60,
 
-                text_channel = guild.get_channel(
-                    config.get(
-                        "text_channel_id"
-                    )
-                )
+#                 reconnect=True
+#             )
 
-                if not voice_channel:
-                    continue
+#             print(
+#                 "🟢 VOICE CONNECTION COMPLETE"
+#             )
 
-                if not text_channel:
-                    continue
+#             print(
+#                 f"Connected: "
+#                 f"{voice_client.is_connected()}"
+#             )
 
-                self.players[
-                    guild.id
-                ] = {
+#             print(
+#                 f"Channel: "
+#                 f"{voice_client.channel}"
+#             )
 
-                    "voice_channel_id":
-                        voice_channel.id,
+#             print(
+#                 f"Endpoint: "
+#                 f"{voice_client.endpoint}"
+#             )
 
-                    "text_channel_id":
-                        text_channel.id,
+#             print(
+#                 f"Session ID: "
+#                 f"{voice_client.session_id}"
+#             )
 
-                    "volume":
-                        DEFAULT_VOLUME,
+#             print("=" * 70)
 
-                    "paused":
-                        False,
+#             await interaction.followup.send(
 
-                    "title":
-                        "Reconnecting...",
+#                 "🟢 **VOICE CONNECTION SUCCESSFUL**\n\n"
 
-                    "source_url":
-                        MALAYALAM_SOURCE,
+#                 f"🎧 Channel: {channel.mention}\n"
+#                 f"🔌 Connected: `{voice_client.is_connected()}`\n"
+#                 f"📡 Endpoint: `{voice_client.endpoint}`\n\n"
 
-                    "message_id":
-                        None,
+#                 "Discord voice connection is working.",
 
-                    "starting":
-                        False
-                }
+#                 ephemeral=True
+#             )
 
-                # Find existing panel
-                try:
+#         except asyncio.TimeoutError:
 
-                    async for message in text_channel.history(
-                        limit=20
-                    ):
+#             print(
+#                 "❌ VOICE CONNECTION TIMEOUT"
+#             )
 
-                        if (
-                            message.author.id
-                            == self.bot.user.id
-                            and message.embeds
-                        ):
+#             print("=" * 70)
 
-                            self.players[
-                                guild.id
-                            ]["message_id"] = message.id
+#             await interaction.followup.send(
 
-                            break
+#                 "🔴 **Voice connection timed out.**\n\n"
 
-                except Exception:
-                    pass
+#                 "Check the Render logs.",
 
-                # Connect
-                await self.connect_and_play(
-                    guild
-                )
+#                 ephemeral=True
+#             )
 
-            except Exception as e:
+#         except discord.Forbidden as e:
 
-                print(
-                    f"⚠️ Could not restore music "
-                    f"for {guild_id}: {e}"
-                )
+#             print(
+#                 f"❌ DISCORD FORBIDDEN: {e}"
+#             )
 
-    # =====================================================
-    # PLAYER PANEL
-    # =====================================================
+#             print("=" * 70)
 
-    async def send_player_panel(
-        self,
-        guild
-    ):
+#             await interaction.followup.send(
 
-        player = self.players.get(
-            guild.id
-        )
+#                 f"🔴 **Discord rejected the connection.**\n\n"
+#                 f"`{e}`",
 
-        if not player:
-            return None
+#                 ephemeral=True
+#             )
 
-        text_channel = guild.get_channel(
-            player["text_channel_id"]
-        )
+#         except discord.ClientException as e:
 
-        if not text_channel:
-            return None
+#             print(
+#                 f"❌ DISCORD CLIENT ERROR: {e}"
+#             )
 
-        embed = self.create_player_embed(
-            guild
-        )
+#             print("=" * 70)
 
-        try:
+#             await interaction.followup.send(
 
-            message = await text_channel.send(
+#                 f"🔴 **Discord client error.**\n\n"
+#                 f"`{e}`",
 
-                embed=embed,
+#                 ephemeral=True
+#             )
 
-                view=MusicControlView(
-                    self,
-                    guild.id
-                )
-            )
+#         except Exception as e:
 
-            return message
+#             print(
+#                 f"❌ VOICE ERROR"
+#             )
 
-        except discord.HTTPException as e:
+#             print(
+#                 f"Type: {type(e).__name__}"
+#             )
 
-            print(
-                f"❌ Could not send music panel: {e}"
-            )
+#             print(
+#                 f"Error: {e}"
+#             )
 
-            return None
+#             print("=" * 70)
 
-    # =====================================================
-    # CREATE EMBED
-    # =====================================================
+#             await interaction.followup.send(
 
-    def create_player_embed(
-        self,
-        guild
-    ):
+#                 "🔴 **Voice connection failed.**\n\n"
 
-        player = self.players.get(
-            guild.id,
-            {}
-        )
+#                 f"Type: `{type(e).__name__}`\n"
+#                 f"Error: `{e}`",
 
-        title = player.get(
-            "title",
-            "Malayalam Music"
-        )
+#                 ephemeral=True
+#             )
 
-        volume = int(
-            player.get(
-                "volume",
-                DEFAULT_VOLUME
-            ) * 100
-        )
+#     # =====================================================
+#     # CONNECT TO VOICE
+#     # =====================================================
 
-        paused = player.get(
-            "paused",
-            False
-        )
+#     async def connect_to_voice(
+#         self,
+#         guild
+#     ):
 
-        if paused:
+#         if guild.id in self.connecting:
 
-            status = "⏸️ Paused"
+#             print(
+#                 f"⏳ Already connecting "
+#                 f"to {guild.name}"
+#             )
 
-        else:
+#             return False
 
-            voice_client = guild.voice_client
+#         self.connecting.add(
+#             guild.id
+#         )
 
-            if (
-                voice_client
-                and voice_client.is_playing()
-            ):
+#         try:
 
-                status = "🟢 Playing"
+#             player = self.players.get(
+#                 guild.id
+#             )
 
-            else:
+#             if not player:
 
-                status = "🟡 Connecting..."
+#                 return False
 
-        embed = discord.Embed(
-            title="🎵 MALAYALAM MUSIC",
-            description=(
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
+#             channel = guild.get_channel(
+#                 player[
+#                     "voice_channel_id"
+#                 ]
+#             )
 
-                f"🎶 **Now Playing**\n"
-                f"**{title}**\n\n"
+#             if not channel:
 
-                f"📻 **Source:** Malayalam Music\n"
-                f"🔊 **Volume:** `{volume}%`\n"
-                f"📡 **Status:** {status}\n\n"
+#                 print(
+#                     "❌ Music voice channel missing."
+#                 )
 
-                "Enjoy Malayalam music 24/7 🎧\n\n"
+#                 return False
 
-                "━━━━━━━━━━━━━━━━━━━━"
-            ),
-            color=discord.Color.blurple()
-        )
+#             # -------------------------------------------------
+#             # CHECK EXISTING
+#             # -------------------------------------------------
 
-        if guild.icon:
+#             voice_client = guild.voice_client
 
-            embed.set_thumbnail(
-                url=guild.icon.url
-            )
+#             if voice_client:
 
-        embed.set_footer(
-            text=f"{guild.name} • 24/7 Music",
-            icon_url=(
-                guild.icon.url
-                if guild.icon
-                else None
-            )
-        )
+#                 if voice_client.is_connected():
 
-        return embed
+#                     if (
+#                         voice_client.channel.id
+#                         != channel.id
+#                     ):
 
-    # =====================================================
-    # UPDATE PANEL
-    # =====================================================
+#                         await voice_client.move_to(
+#                             channel
+#                         )
 
-    async def update_player_panel(
-        self,
-        guild
-    ):
+#                     return True
 
-        player = self.players.get(
-            guild.id
-        )
+#                 try:
 
-        if not player:
-            return
+#                     await voice_client.disconnect(
+#                         force=True
+#                     )
 
-        text_channel = guild.get_channel(
-            player["text_channel_id"]
-        )
+#                 except:
+#                     pass
 
-        if not text_channel:
-            return
+#                 await asyncio.sleep(
+#                     2
+#                 )
 
-        message_id = player.get(
-            "message_id"
-        )
+#             # -------------------------------------------------
+#             # CONNECT
+#             # -------------------------------------------------
 
-        # -------------------------------------------------
-        # Edit existing panel
-        # -------------------------------------------------
+#             print(
+#                 f"🔌 Connecting to "
+#                 f"{channel.name}..."
+#             )
 
-        if message_id:
+#             voice_client = await channel.connect(
 
-            try:
+#                 timeout=60,
 
-                message = await text_channel.fetch_message(
-                    message_id
-                )
+#                 reconnect=True
+#             )
 
-                await message.edit(
-                    embed=self.create_player_embed(
-                        guild
-                    ),
-                    view=MusicControlView(
-                        self,
-                        guild.id
-                    )
-                )
+#             print(
+#                 f"🟢 Connected to "
+#                 f"{channel.name}"
+#             )
 
-                return
+#             # -------------------------------------------------
+#             # START MUSIC
+#             # -------------------------------------------------
 
-            except (
-                discord.NotFound,
-                discord.HTTPException
-            ):
+#             if (
+#                 not voice_client.is_playing()
+#                 and not voice_client.is_paused()
+#             ):
 
-                pass
+#                 await self.start_music(
+#                     guild,
+#                     voice_client
+#                 )
 
-        # -------------------------------------------------
-        # Create a new panel
-        # -------------------------------------------------
+#             await self.update_panel(
+#                 guild
+#             )
 
-        try:
+#             return True
 
-            message = await text_channel.send(
+#         except asyncio.TimeoutError:
 
-                embed=self.create_player_embed(
-                    guild
-                ),
+#             print(
+#                 "❌ Voice connection timeout."
+#             )
 
-                view=MusicControlView(
-                    self,
-                    guild.id
-                )
-            )
+#             return False
 
-            player["message_id"] = message.id
+#         except discord.Forbidden as e:
 
-        except discord.HTTPException:
+#             print(
+#                 f"❌ Discord Forbidden: {e}"
+#             )
 
-            pass
+#             return False
 
-    # =====================================================
-    # VOLUME
-    # =====================================================
+#         except discord.ClientException as e:
 
-    async def change_volume(
-        self,
-        interaction,
-        amount
-    ):
+#             print(
+#                 f"❌ Discord ClientException: {e}"
+#             )
 
-        guild = interaction.guild
+#             return False
 
-        player = self.players.get(
-            guild.id
-        )
+#         except Exception as e:
 
-        if not player:
+#             print(
+#                 f"❌ Voice connection error:"
+#                 f" {type(e).__name__}: {e}"
+#             )
 
-            await interaction.response.send_message(
-                "❌ Music system is not configured.",
-                ephemeral=True
-            )
+#             return False
 
-            return
+#         finally:
 
-        current = player.get(
-            "volume",
-            DEFAULT_VOLUME
-        )
+#             self.connecting.discard(
+#                 guild.id
+#             )
 
-        new_volume = max(
-            0.0,
-            min(
-                1.0,
-                current + amount
-            )
-        )
+#     # =====================================================
+#     # EXTRACT STREAM
+#     # =====================================================
 
-        player["volume"] = new_volume
+#     async def extract_stream(
+#         self,
+#         source
+#     ):
 
-        voice_client = guild.voice_client
+#         loop = asyncio.get_running_loop()
 
-        if (
-            voice_client
-            and voice_client.source
-            and isinstance(
-                voice_client.source,
-                discord.PCMVolumeTransformer
-            )
-        ):
+#         def extract():
 
-            voice_client.source.volume = new_volume
+#             try:
 
-        await interaction.response.send_message(
-            f"🔊 Volume: **{int(new_volume * 100)}%**",
-            ephemeral=True
-        )
+#                 with yt_dlp.YoutubeDL(
+#                     YTDL_OPTIONS
+#                 ) as ydl:
 
-        await self.update_player_panel(
-            guild
-        )
+#                     info = ydl.extract_info(
+#                         source,
+#                         download=False
+#                     )
 
-    # =====================================================
-    # PAUSE
-    # =====================================================
+#                     if not info:
 
-    async def pause_music(
-        self,
-        interaction
-    ):
+#                         return None
 
-        guild = interaction.guild
+#                     # -------------------------------------------------
+#                     # PLAYLIST
+#                     # -------------------------------------------------
 
-        voice_client = guild.voice_client
+#                     if "entries" in info:
 
-        if not voice_client:
+#                         entries = [
+#                             item
+#                             for item in info["entries"]
+#                             if item
+#                         ]
 
-            await interaction.response.send_message(
-                "❌ Music bot is not connected.",
-                ephemeral=True
-            )
+#                         if not entries:
 
-            return
+#                             return None
 
-        if voice_client.is_playing():
+#                         info = entries[0]
 
-            voice_client.pause()
+#                     return {
 
-            self.players[
-                guild.id
-            ]["paused"] = True
+#                         "title":
+#                             info.get(
+#                                 "title",
+#                                 "Malayalam Music"
+#                             ),
 
-            await interaction.response.send_message(
-                "⏸️ Music paused.",
-                ephemeral=True
-            )
+#                         "stream_url":
+#                             info.get(
+#                                 "url"
+#                             ),
 
-        else:
+#                         "webpage_url":
+#                             info.get(
+#                                 "webpage_url",
+#                                 source
+#                             )
+#                     }
 
-            await interaction.response.send_message(
-                "⚠️ Music is not currently playing.",
-                ephemeral=True
-            )
+#             except Exception as e:
 
-        await self.update_player_panel(
-            guild
-        )
+#                 print(
+#                     f"❌ yt-dlp error:"
+#                     f" {type(e).__name__}: {e}"
+#                 )
 
-    # =====================================================
-    # RESUME
-    # =====================================================
+#                 return None
 
-    async def resume_music(
-        self,
-        interaction
-    ):
+#         return await loop.run_in_executor(
+#             None,
+#             extract
+#         )
 
-        guild = interaction.guild
+#     # =====================================================
+#     # START MUSIC
+#     # =====================================================
 
-        voice_client = guild.voice_client
+#     async def start_music(
+#         self,
+#         guild,
+#         voice_client
+#     ):
 
-        if not voice_client:
+#         player = self.players.get(
+#             guild.id
+#         )
 
-            await interaction.response.send_message(
-                "❌ Music bot is not connected.",
-                ephemeral=True
-            )
+#         if not player:
 
-            return
+#             return
 
-        if voice_client.is_paused():
+#         if player.get(
+#             "starting",
+#             False
+#         ):
 
-            voice_client.resume()
+#             return
 
-            self.players[
-                guild.id
-            ]["paused"] = False
+#         if not voice_client.is_connected():
 
-            await interaction.response.send_message(
-                "▶️ Music resumed.",
-                ephemeral=True
-            )
+#             print(
+#                 "❌ Cannot start music. "
+#                 "Voice client is disconnected."
+#             )
 
-        else:
+#             return
 
-            await interaction.response.send_message(
-                "⚠️ Music is not paused.",
-                ephemeral=True
-            )
+#         if not MUSIC_SOURCE:
 
-        await self.update_player_panel(
-            guild
-        )
+#             print(
+#                 "❌ MALAYALAM_SOURCE is empty."
+#             )
 
-    # =====================================================
-    # RESTART CURRENT STREAM
-    # =====================================================
+#             return
 
-    async def restart_music(
-        self,
-        interaction
-    ):
+#         player["starting"] = True
 
-        guild = interaction.guild
+#         try:
 
-        voice_client = guild.voice_client
+#             print(
+#                 "🔎 Getting music stream..."
+#             )
 
-        if not voice_client:
+#             stream = await self.extract_stream(
+#                 MUSIC_SOURCE
+#             )
 
-            await interaction.response.send_message(
-                "❌ Music bot is not connected.",
-                ephemeral=True
-            )
+#             if not stream:
 
-            return
+#                 print(
+#                     "❌ Could not extract stream."
+#                 )
 
-        await interaction.response.send_message(
-            "🔄 Refreshing the music stream...",
-            ephemeral=True
-        )
+#                 player["title"] = (
+#                     "Music source unavailable"
+#                 )
 
-        try:
+#                 await self.update_panel(
+#                     guild
+#                 )
 
-            voice_client.stop()
+#                 return
 
-        except:
-            pass
+#             stream_url = stream.get(
+#                 "stream_url"
+#             )
 
-        self.players[
-            guild.id
-        ]["paused"] = False
+#             if not stream_url:
 
-        await asyncio.sleep(1)
+#                 print(
+#                     "❌ No stream URL returned."
+#                 )
 
-        await self.start_stream(
-            guild,
-            voice_client
-        )
+#                 return
 
-    # =====================================================
-    # ERROR
-    # =====================================================
+#             title = stream.get(
+#                 "title",
+#                 "Malayalam Music"
+#             )
 
-    @setmusic.error
-    async def setmusic_error(
-        self,
-        interaction,
-        error
-    ):
+#             webpage_url = stream.get(
+#                 "webpage_url",
+#                 MUSIC_SOURCE
+#             )
 
-        if isinstance(
-            error,
-            app_commands.errors.MissingPermissions
-        ):
+#             player["title"] = title
 
-            await interaction.response.send_message(
-                "❌ You need **Administrator** permission.",
-                ephemeral=True
-            )
+#             player["url"] = webpage_url
 
+#             # -------------------------------------------------
+#             # FFMPEG OPUS
+#             #
+#             # FFmpeg encodes the stream directly to Opus.
+#             # This avoids requiring local Opus encoding
+#             # from discord.py.
+#             # -------------------------------------------------
 
-# =========================================================
-# MUSIC CONTROL VIEW
-# =========================================================
+#             source = discord.FFmpegOpusAudio(
 
-class MusicControlView(
-    discord.ui.View
-):
+#                 stream_url,
 
-    def __init__(
-        self,
-        cog,
-        guild_id
-    ):
+#                 before_options=
+#                 FFMPEG_BEFORE_OPTIONS,
 
-        super().__init__(
-            timeout=None
-        )
+#                 options=
+#                 FFMPEG_OPTIONS,
 
-        self.cog = cog
-        self.guild_id = guild_id
+#                 bitrate=128
+#             )
 
-    # =====================================================
-    # VOLUME DOWN
-    # =====================================================
+#             # -------------------------------------------------
+#             # APPLY VOLUME
+#             # -------------------------------------------------
 
-    @discord.ui.button(
-        label="Volume -",
-        emoji="🔉",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music_volume_down"
-    )
-    async def volume_down(
-        self,
-        interaction,
-        button
-    ):
+#             source = discord.PCMVolumeTransformer(
+#                 source,
+#                 volume=player.get(
+#                     "volume",
+#                     DEFAULT_VOLUME
+#                 )
+#             )
 
-        await self.cog.change_volume(
-            interaction,
-            -0.10
-        )
+#             # -------------------------------------------------
+#             # CALLBACK
+#             # -------------------------------------------------
 
-    # =====================================================
-    # VOLUME UP
-    # =====================================================
+#             def playback_finished(
+#                 error
+#             ):
 
-    @discord.ui.button(
-        label="Volume +",
-        emoji="🔊",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music_volume_up"
-    )
-    async def volume_up(
-        self,
-        interaction,
-        button
-    ):
+#                 if error:
 
-        await self.cog.change_volume(
-            interaction,
-            0.10
-        )
+#                     print(
+#                         f"⚠️ Playback error: {error}"
+#                     )
 
-    # =====================================================
-    # PAUSE
-    # =====================================================
+#                 asyncio.run_coroutine_threadsafe(
 
-    @discord.ui.button(
-        label="Pause",
-        emoji="⏸️",
-        style=discord.ButtonStyle.primary,
-        custom_id="music_pause"
-    )
-    async def pause(
-        self,
-        interaction,
-        button
-    ):
+#                     self.music_finished(
+#                         guild.id
+#                     ),
 
-        await self.cog.pause_music(
-            interaction
-        )
+#                     self.bot.loop
+#                 )
 
-    # =====================================================
-    # RESUME
-    # =====================================================
+#             # -------------------------------------------------
+#             # PLAY
+#             # -------------------------------------------------
 
-    @discord.ui.button(
-        label="Resume",
-        emoji="▶️",
-        style=discord.ButtonStyle.success,
-        custom_id="music_resume"
-    )
-    async def resume(
-        self,
-        interaction,
-        button
-    ):
+#             voice_client.play(
 
-        await self.cog.resume_music(
-            interaction
-        )
+#                 source,
 
-    # =====================================================
-    # RESTART
-    # =====================================================
+#                 after=playback_finished
+#             )
 
-    @discord.ui.button(
-        label="Refresh",
-        emoji="🔄",
-        style=discord.ButtonStyle.primary,
-        custom_id="music_refresh"
-    )
-    async def refresh(
-        self,
-        interaction,
-        button
-    ):
+#             player["paused"] = False
 
-        await self.cog.restart_music(
-            interaction
-        )
+#             print(
+#                 f"🎵 NOW PLAYING: {title}"
+#             )
 
+#             await self.update_panel(
+#                 guild
+#             )
 
-# =========================================================
-# COG SETUP
-# =========================================================
+#         except Exception as e:
 
-async def setup(bot):
+#             print(
+#                 f"❌ Music error:"
+#                 f" {type(e).__name__}: {e}"
+#             )
 
-    await bot.add_cog(
-        MusicSystem(bot)
-    )
+#             player["title"] = (
+#                 "Music error - reconnecting..."
+#             )
+
+#             await self.update_panel(
+#                 guild
+#             )
+
+#         finally:
+
+#             player["starting"] = False
+
+#     # =====================================================
+#     # MUSIC FINISHED
+#     # =====================================================
+
+#     async def music_finished(
+#         self,
+#         guild_id
+#     ):
+
+#         await asyncio.sleep(
+#             2
+#         )
+
+#         guild = self.bot.get_guild(
+#             guild_id
+#         )
+
+#         if not guild:
+
+#             return
+
+#         player = self.players.get(
+#             guild_id
+#         )
+
+#         if not player:
+
+#             return
+
+#         if player.get(
+#             "paused",
+#             False
+#         ):
+
+#             return
+
+#         voice_client = guild.voice_client
+
+#         if not voice_client:
+
+#             return
+
+#         if not voice_client.is_connected():
+
+#             return
+
+#         if voice_client.is_playing():
+
+#             return
+
+#         await self.start_music(
+#             guild,
+#             voice_client
+#         )
+
+#     # =====================================================
+#     # WATCHDOG
+#     # =====================================================
+
+#     @tasks.loop(
+#         seconds=WATCHDOG_INTERVAL
+#     )
+#     async def music_watchdog(
+#         self
+#     ):
+
+#         for guild_id in list(
+#             self.players.keys()
+#         ):
+
+#             try:
+
+#                 guild = self.bot.get_guild(
+#                     guild_id
+#                 )
+
+#                 if not guild:
+
+#                     continue
+
+#                 player = self.players.get(
+#                     guild_id
+#                 )
+
+#                 if not player:
+
+#                     continue
+
+#                 voice_client = guild.voice_client
+
+#                 # -------------------------------------------------
+#                 # NOT CONNECTED
+#                 # -------------------------------------------------
+
+#                 if not voice_client:
+
+#                     print(
+#                         f"🔄 Watchdog reconnecting "
+#                         f"{guild.name}"
+#                     )
+
+#                     await self.connect_to_voice(
+#                         guild
+#                     )
+
+#                     continue
+
+#                 # -------------------------------------------------
+#                 # DISCONNECTED
+#                 # -------------------------------------------------
+
+#                 if not voice_client.is_connected():
+
+#                     print(
+#                         f"⚠️ Voice disconnected "
+#                         f"in {guild.name}"
+#                     )
+
+#                     continue
+
+#                 # -------------------------------------------------
+#                 # MUSIC STOPPED
+#                 # -------------------------------------------------
+
+#                 if (
+#                     not voice_client.is_playing()
+#                     and not voice_client.is_paused()
+#                     and not player.get(
+#                         "starting",
+#                         False
+#                     )
+#                 ):
+
+#                     print(
+#                         f"🔄 Restarting music "
+#                         f"in {guild.name}"
+#                     )
+
+#                     await self.start_music(
+#                         guild,
+#                         voice_client
+#                     )
+
+#             except Exception as e:
+
+#                 print(
+#                     f"⚠️ Watchdog error:"
+#                     f" {type(e).__name__}: {e}"
+#                 )
+
+#     # =====================================================
+#     # WATCHDOG BEFORE LOOP
+#     # =====================================================
+
+#     @music_watchdog.before_loop
+#     async def before_watchdog(
+#         self
+#     ):
+
+#         await self.bot.wait_until_ready()
+
+#         print(
+#             "🎵 Music watchdog started."
+#         )
+
+#         await asyncio.sleep(
+#             5
+#         )
+
+#         await self.restore_music()
+
+#     # =====================================================
+#     # RESTORE AFTER RESTART
+#     # =====================================================
+
+#     async def restore_music(
+#         self
+#     ):
+
+#         if not self.config:
+
+#             print(
+#                 "ℹ️ No saved music systems."
+#             )
+
+#             return
+
+#         print(
+#             "🔄 Restoring music systems..."
+#         )
+
+#         for guild_id, config in list(
+#             self.config.items()
+#         ):
+
+#             try:
+
+#                 guild = self.bot.get_guild(
+#                     int(guild_id)
+#                 )
+
+#                 if not guild:
+
+#                     continue
+
+#                 voice = guild.get_channel(
+#                     config.get(
+#                         "voice_channel_id"
+#                     )
+#                 )
+
+#                 text = guild.get_channel(
+#                     config.get(
+#                         "text_channel_id"
+#                     )
+#                 )
+
+#                 if not voice or not text:
+
+#                     print(
+#                         f"⚠️ Music channels missing "
+#                         f"in {guild.name}"
+#                     )
+
+#                     continue
+
+#                 self.players[
+#                     guild.id
+#                 ] = {
+
+#                     "voice_channel_id":
+#                         voice.id,
+
+#                     "text_channel_id":
+#                         text.id,
+
+#                     "message_id":
+#                         None,
+
+#                     "volume":
+#                         DEFAULT_VOLUME,
+
+#                     "paused":
+#                         False,
+
+#                     "starting":
+#                         False,
+
+#                     "title":
+#                         "Reconnecting...",
+
+#                     "url":
+#                         MUSIC_SOURCE
+#                 }
+
+#                 # -------------------------------------------------
+#                 # FIND PANEL
+#                 # -------------------------------------------------
+
+#                 try:
+
+#                     async for message in text.history(
+#                         limit=30
+#                     ):
+
+#                         if (
+#                             message.author.id
+#                             == self.bot.user.id
+#                             and message.embeds
+#                         ):
+
+#                             self.players[
+#                                 guild.id
+#                             ]["message_id"] = message.id
+
+#                             break
+
+#                 except:
+#                     pass
+
+#                 print(
+#                     f"🔄 Restoring music "
+#                     f"for {guild.name}"
+#                 )
+
+#                 await self.connect_to_voice(
+#                     guild
+#                 )
+
+#             except Exception as e:
+
+#                 print(
+#                     f"❌ Restore error:"
+#                     f" {type(e).__name__}: {e}"
+#                 )
+
+#     # =====================================================
+#     # PLAYER EMBED
+#     # =====================================================
+
+#     def player_embed(
+#         self,
+#         guild
+#     ):
+
+#         player = self.players.get(
+#             guild.id,
+#             {}
+#         )
+
+#         title = player.get(
+#             "title",
+#             "Malayalam Music"
+#         )
+
+#         volume = int(
+#             player.get(
+#                 "volume",
+#                 DEFAULT_VOLUME
+#             ) * 100
+#         )
+
+#         voice_client = guild.voice_client
+
+#         if player.get(
+#             "paused",
+#             False
+#         ):
+
+#             status = "⏸️ Paused"
+
+#         elif (
+#             voice_client
+#             and voice_client.is_connected()
+#             and voice_client.is_playing()
+#         ):
+
+#             status = "🟢 Playing"
+
+#         elif (
+#             voice_client
+#             and voice_client.is_connected()
+#         ):
+
+#             status = "🟡 Connected"
+
+#         else:
+
+#             status = "🔴 Connecting..."
+
+#         embed = discord.Embed(
+
+#             title="🎵 MALAYALAM MUSIC",
+
+#             description=(
+
+#                 "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+#                 "🎶 **NOW PLAYING**\n\n"
+
+#                 f"**{title}**\n\n"
+
+#                 f"📻 **24/7 Malayalam Music**\n"
+#                 f"🔊 **Volume:** `{volume}%`\n"
+#                 f"📡 **Status:** {status}\n\n"
+
+#                 "⏸️ Pause when you want.\n"
+#                 "▶️ Resume anytime.\n"
+#                 "🔊 Control the volume.\n\n"
+
+#                 "━━━━━━━━━━━━━━━━━━━━"
+#             ),
+
+#             color=discord.Color.blurple()
+#         )
+
+#         if guild.icon:
+
+#             embed.set_thumbnail(
+#                 url=guild.icon.url
+#             )
+
+#         embed.set_footer(
+
+#             text=(
+#                 f"{guild.name} • "
+#                 "24/7 Music"
+#             ),
+
+#             icon_url=(
+#                 guild.icon.url
+#                 if guild.icon
+#                 else None
+#             )
+#         )
+
+#         return embed
+
+#     # =====================================================
+#     # SEND PANEL
+#     # =====================================================
+
+#     async def send_panel(
+#         self,
+#         guild
+#     ):
+
+#         player = self.players.get(
+#             guild.id
+#         )
+
+#         if not player:
+
+#             return None
+
+#         channel = guild.get_channel(
+#             player[
+#                 "text_channel_id"
+#             ]
+#         )
+
+#         if not channel:
+
+#             return None
+
+#         try:
+
+#             return await channel.send(
+
+#                 embed=self.player_embed(
+#                     guild
+#                 ),
+
+#                 view=MusicControlView(
+#                     self.bot
+#                 )
+#             )
+
+#         except Exception as e:
+
+#             print(
+#                 f"❌ Panel error: {e}"
+#             )
+
+#             return None
+
+#     # =====================================================
+#     # UPDATE PANEL
+#     # =====================================================
+
+#     async def update_panel(
+#         self,
+#         guild
+#     ):
+
+#         player = self.players.get(
+#             guild.id
+#         )
+
+#         if not player:
+
+#             return
+
+#         channel = guild.get_channel(
+#             player[
+#                 "text_channel_id"
+#             ]
+#         )
+
+#         if not channel:
+
+#             return
+
+#         message_id = player.get(
+#             "message_id"
+#         )
+
+#         # -------------------------------------------------
+#         # EDIT EXISTING
+#         # -------------------------------------------------
+
+#         if message_id:
+
+#             try:
+
+#                 message = await channel.fetch_message(
+#                     message_id
+#                 )
+
+#                 await message.edit(
+
+#                     embed=self.player_embed(
+#                         guild
+#                     ),
+
+#                     view=MusicControlView(
+#                         self.bot
+#                     )
+#                 )
+
+#                 return
+
+#             except:
+#                 pass
+
+#         # -------------------------------------------------
+#         # CREATE NEW
+#         # -------------------------------------------------
+
+#         message = await self.send_panel(
+#             guild
+#         )
+
+#         if message:
+
+#             player[
+#                 "message_id"
+#             ] = message.id
+
+#     # =====================================================
+#     # CHANGE VOLUME
+#     # =====================================================
+
+#     async def change_volume(
+#         self,
+#         interaction,
+#         amount
+#     ):
+
+#         guild = interaction.guild
+
+#         player = self.players.get(
+#             guild.id
+#         )
+
+#         if not player:
+
+#             await interaction.response.send_message(
+#                 "❌ Music system is not configured.",
+#                 ephemeral=True
+#             )
+
+#             return
+
+#         volume = player.get(
+#             "volume",
+#             DEFAULT_VOLUME
+#         )
+
+#         volume = max(
+#             0.0,
+#             min(
+#                 1.0,
+#                 volume + amount
+#             )
+#         )
+
+#         player["volume"] = volume
+
+#         voice_client = guild.voice_client
+
+#         if (
+#             voice_client
+#             and voice_client.source
+#             and isinstance(
+#                 voice_client.source,
+#                 discord.PCMVolumeTransformer
+#             )
+#         ):
+
+#             voice_client.source.volume = volume
+
+#         await interaction.response.send_message(
+
+#             f"🔊 Volume: "
+#             f"**{int(volume * 100)}%**",
+
+#             ephemeral=True
+#         )
+
+#         await self.update_panel(
+#             guild
+#         )
+
+#     # =====================================================
+#     # PAUSE
+#     # =====================================================
+
+#     async def pause_music(
+#         self,
+#         interaction
+#     ):
+
+#         guild = interaction.guild
+
+#         voice_client = guild.voice_client
+
+#         if not voice_client:
+
+#             await interaction.response.send_message(
+
+#                 "❌ Bot is not connected to voice.",
+
+#                 ephemeral=True
+#             )
+
+#             return
+
+#         if voice_client.is_playing():
+
+#             voice_client.pause()
+
+#             self.players[
+#                 guild.id
+#             ]["paused"] = True
+
+#             await interaction.response.send_message(
+#                 "⏸️ Music paused.",
+#                 ephemeral=True
+#             )
+
+#         else:
+
+#             await interaction.response.send_message(
+#                 "⚠️ Music is not playing.",
+#                 ephemeral=True
+#             )
+
+#         await self.update_panel(
+#             guild
+#         )
+
+#     # =====================================================
+#     # RESUME
+#     # =====================================================
+
+#     async def resume_music(
+#         self,
+#         interaction
+#     ):
+
+#         guild = interaction.guild
+
+#         voice_client = guild.voice_client
+
+#         if not voice_client:
+
+#             await interaction.response.send_message(
+
+#                 "🔄 Reconnecting to voice...",
+
+#                 ephemeral=True
+#             )
+
+#             connected = await self.connect_to_voice(
+#                 guild
+#             )
+
+#             if not connected:
+
+#                 await interaction.edit_original_response(
+
+#                     content=(
+#                         "❌ Could not connect to voice."
+#                     )
+#                 )
+
+#                 return
+
+#             voice_client = guild.voice_client
+
+#         if voice_client.is_paused():
+
+#             voice_client.resume()
+
+#             self.players[
+#                 guild.id
+#             ]["paused"] = False
+
+#             await interaction.response.send_message(
+#                 "▶️ Music resumed.",
+#                 ephemeral=True
+#             )
+
+#         elif voice_client.is_playing():
+
+#             await interaction.response.send_message(
+#                 "▶️ Music is already playing.",
+#                 ephemeral=True
+#             )
+
+#         else:
+
+#             self.players[
+#                 guild.id
+#             ]["paused"] = False
+
+#             await self.start_music(
+#                 guild,
+#                 voice_client
+#             )
+
+#             await interaction.response.send_message(
+#                 "▶️ Music started.",
+#                 ephemeral=True
+#             )
+
+#         await self.update_panel(
+#             guild
+#         )
+
+#     # =====================================================
+#     # REFRESH
+#     # =====================================================
+
+#     async def refresh_music(
+#         self,
+#         interaction
+#     ):
+
+#         guild = interaction.guild
+
+#         voice_client = guild.voice_client
+
+#         if not voice_client:
+
+#             connected = await self.connect_to_voice(
+#                 guild
+#             )
+
+#             if not connected:
+
+#                 await interaction.response.send_message(
+#                     "❌ Could not connect to voice.",
+#                     ephemeral=True
+#                 )
+
+#                 return
+
+#             voice_client = guild.voice_client
+
+#         try:
+
+#             if voice_client.is_playing():
+
+#                 voice_client.stop()
+
+#         except:
+#             pass
+
+#         self.players[
+#             guild.id
+#         ]["paused"] = False
+
+#         await asyncio.sleep(
+#             1
+#         )
+
+#         await self.start_music(
+#             guild,
+#             voice_client
+#         )
+
+#         await interaction.response.send_message(
+#             "🔄 Music refreshed.",
+#             ephemeral=True
+#         )
+
+
+# # =========================================================
+# # MUSIC CONTROL VIEW
+# # =========================================================
+
+# class MusicControlView(
+#     discord.ui.View
+# ):
+
+#     def __init__(
+#         self,
+#         bot
+#     ):
+
+#         super().__init__(
+#             timeout=None
+#         )
+
+#         self.bot = bot
+
+#     # =====================================================
+#     # GET COG
+#     # =====================================================
+
+#     def get_cog(self):
+
+#         return self.bot.get_cog(
+#             "MusicSystem"
+#         )
+
+#     # =====================================================
+#     # VOLUME DOWN
+#     # =====================================================
+
+#     @discord.ui.button(
+#         label="Volume -",
+#         emoji="🔉",
+#         style=discord.ButtonStyle.secondary,
+#         custom_id="music_volume_down"
+#     )
+#     async def volume_down(
+#         self,
+#         interaction,
+#         button
+#     ):
+
+#         cog = self.get_cog()
+
+#         if not cog:
+
+#             await interaction.response.send_message(
+#                 "❌ Music system is loading.",
+#                 ephemeral=True
+#             )
+
+#             return
+
+#         await cog.change_volume(
+#             interaction,
+#             -0.10
+#         )
+
+#     # =====================================================
+#     # VOLUME UP
+#     # =====================================================
+
+#     @discord.ui.button(
+#         label="Volume +",
+#         emoji="🔊",
+#         style=discord.ButtonStyle.secondary,
+#         custom_id="music_volume_up"
+#     )
+#     async def volume_up(
+#         self,
+#         interaction,
+#         button
+#     ):
+
+#         cog = self.get_cog()
+
+#         if not cog:
+
+#             await interaction.response.send_message(
+#                 "❌ Music system is loading.",
+#                 ephemeral=True
+#             )
+
+#             return
+
+#         await cog.change_volume(
+#             interaction,
+#             0.10
+#         )
+
+#     # =====================================================
+#     # PAUSE
+#     # =====================================================
+
+#     @discord.ui.button(
+#         label="Pause",
+#         emoji="⏸️",
+#         style=discord.ButtonStyle.primary,
+#         custom_id="music_pause"
+#     )
+#     async def pause(
+#         self,
+#         interaction,
+#         button
+#     ):
+
+#         cog = self.get_cog()
+
+#         if not cog:
+
+#             await interaction.response.send_message(
+#                 "❌ Music system is loading.",
+#                 ephemeral=True
+#             )
+
+#             return
+
+#         await cog.pause_music(
+#             interaction
+#         )
+
+#     # =====================================================
+#     # RESUME
+#     # =====================================================
+
+#     @discord.ui.button(
+#         label="Resume",
+#         emoji="▶️",
+#         style=discord.ButtonStyle.success,
+#         custom_id="music_resume"
+#     )
+#     async def resume(
+#         self,
+#         interaction,
+#         button
+#     ):
+
+#         cog = self.get_cog()
+
+#         if not cog:
+
+#             await interaction.response.send_message(
+#                 "❌ Music system is loading.",
+#                 ephemeral=True
+#             )
+
+#             return
+
+#         await cog.resume_music(
+#             interaction
+#         )
+
+#     # =====================================================
+#     # REFRESH
+#     # =====================================================
+
+#     @discord.ui.button(
+#         label="Refresh",
+#         emoji="🔄",
+#         style=discord.ButtonStyle.primary,
+#         custom_id="music_refresh"
+#     )
+#     async def refresh(
+#         self,
+#         interaction,
+#         button
+#     ):
+
+#         cog = self.get_cog()
+
+#         if not cog:
+
+#             await interaction.response.send_message(
+#                 "❌ Music system is loading.",
+#                 ephemeral=True
+#             )
+
+#             return
+
+#         await cog.refresh_music(
+#             interaction
+#         )
+
+
+# # =========================================================
+# # SETUP
+# # =========================================================
+
+# async def setup(
+#     bot
+# ):
+
+#     # Persistent buttons
+#     bot.add_view(
+#         MusicControlView(
+#             bot
+#         )
+#     )
+
+#     await bot.add_cog(
+#         MusicSystem(
+#             bot
+#         )
+#     )

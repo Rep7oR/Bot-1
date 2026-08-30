@@ -138,70 +138,180 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 
     
+# ============================================================
+# LOAD COGS
+# ============================================================
 
-# ---------- LOAD COGS ----------
 async def load_cogs():
-    """Load all cogs from the cogs folder"""
 
     cogs_folder = "./cogs"
 
-    if not os.path.exists(cogs_folder):
-        os.makedirs(cogs_folder)
+    if not os.path.exists(
+        cogs_folder
+    ):
 
-    for filename in os.listdir(cogs_folder):
+        os.makedirs(
+            cogs_folder
+        )
 
-        if filename.endswith(".py") and not filename.startswith("_"):
+    files = [
 
-            extension = f"cogs.{filename[:-3]}"
+        filename
 
-            try:
-                await bot.load_extension(extension)
-                print(f"✅ Loaded cog: {filename}")
+        for filename in os.listdir(
+            cogs_folder
+        )
 
-            except Exception as e:
-                print(f"❌ Failed to load {filename}: {e}")
+        if (
+            filename.endswith(".py")
+            and
+            not filename.startswith("_")
+        )
+    ]
+
+    # ========================================================
+    # MASTER CONFIG MUST LOAD FIRST
+    # ========================================================
+
+    master_cog = None
+
+    for filename in files:
+
+        if filename.lower() in {
+            "masterconfig.py",
+            "master_config.py",
+        }:
+
+            master_cog = filename
+
+            break
+
+    # --------------------------------------------------------
+    # Remove Master Config from normal list
+    # --------------------------------------------------------
+
+    if master_cog:
+
+        files.remove(
+            master_cog
+        )
+
+        extension = (
+            f"cogs.{master_cog[:-3]}"
+        )
+
+        try:
+
+            await bot.load_extension(
+                extension
+            )
+
+            print(
+                f"🧠 Loaded FIRST: "
+                f"{master_cog}"
+            )
+
+        except Exception as e:
+
+            print(
+                f"❌ Failed to load "
+                f"{master_cog}: {e}"
+            )
+
+            raise
+
+    else:
+
+        print(
+            "⚠️ WARNING: "
+            "masterconfig.py was not found!"
+        )
+
+    # ========================================================
+    # LOAD EVERYTHING ELSE
+    # ========================================================
+
+    for filename in sorted(
+        files
+    ):
+
+        extension = (
+            f"cogs.{filename[:-3]}"
+        )
+
+        try:
+
+            await bot.load_extension(
+                extension
+            )
+
+            print(
+                f"✅ Loaded cog: {filename}"
+            )
+
+        except Exception as e:
+
+            print(
+                f"❌ Failed to load "
+                f"{filename}: {e}"
+            )
 
 
 # ---------- BOT SETUP ----------
 @bot.event
 async def setup_hook():
 
-    # Load all Cogs BEFORE the bot becomes ready
+    # ---------------------------------------------------------
+    # Load masterconfig FIRST
+    # Then automatically load every other Cog
+    # ---------------------------------------------------------
+
     await load_cogs()
 
+    # ---------------------------------------------------------
     # Sync slash commands
+    # ---------------------------------------------------------
+
     try:
+
         synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} commands.")
+
+        print(
+            f"✅ Synced {len(synced)} slash commands."
+        )
 
     except Exception as e:
-        print(f"❌ Failed to sync slash commands: {e}")
 
-
-
+        print(
+            f"❌ Failed to sync slash commands: {e}"
+        )
 
 
 # ---------- BOT STARTUP ----------
 @bot.event
 async def on_ready():
 
-    print(f"Bot online as {bot.user}")
-
-   
+    print(
+        f"🤖 Bot online as {bot.user}"
+    )
 
     keep_alive()
 
     await bot.change_presence(
+
         activity=discord.Activity(
+
             type=discord.ActivityType.watching,
+
             name="Watching the community"
         ),
+
         status=discord.Status.online
     )
 
 
+# ---------- START BOT ----------
 bot.run(DISCORD_TOKEN)
-
 
 
 
