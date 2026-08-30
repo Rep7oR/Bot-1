@@ -1,454 +1,808 @@
-# ============================================================
-# cogs/clans.py
-# COMPLETE CLAN SYSTEM
-#
-# Features:
-# - Admin chooses application channel
-# - Admin chooses clan category
-# - Members apply using a button
-# - Moderators approve/reject
-# - Application message auto-deletes after decision
-# - Clan roles automatically created
-# - Clan category permissions
-# - Permanent leader management panel
-# - Invite members through buttons
-# - Warn members through buttons
-# - Kick members through buttons
-# - Promote/demote clan moderators
-# - Leader creates text/voice channels through buttons
-# - Leader panel survives bot restart
-# - JSON persistence compatible with MasterConfig backup
-# ============================================================
-
 import discord
 from discord.ext import commands
-from discord import app_commands
+from discord import app_commands, ui
 
-import os
-import json
 import asyncio
-import re
+import json
+import os
 from typing import Optional
 
 
 # ============================================================
-# PERSISTENCE
+# CONFIG
 # ============================================================
 
-PERSIST_DIR = os.getenv(
-    "BOT_PERSIST_DIR",
-    "./data"
-)
-
-os.makedirs(
-    PERSIST_DIR,
-    exist_ok=True
-)
-
-CONFIG_FILE = os.path.join(
-    PERSIST_DIR,
-    "clans_config.json"
-)
+MODERATOR_ROLE_NAME = "MODERATOR"
 
 DATA_FILE = "clan_data.json"
 
 data_lock = asyncio.Lock()
-
-def load_data():
-    ...
-    
-clan_data = load_data()
-)
-
-
-# ============================================================
-# DEFAULT CONFIG
-# ============================================================
-
-DEFAULT_CONFIG = {
-    "application_channel_id": None,
-    "clan_category_id": None,
-    "application_form_message_id": None
-}
 
 
 # ============================================================
 # DEFAULT DATA
 # ============================================================
 
-DEFAULT_DATA = {
-    "clans": {},
-    "applications": {},
-    "invites": {}
-}
+def default_guild_data():
+    return {
+        "application_channel_id": None,
+        "log_channel_id": None,
+        "pending": {},
+        "clans": {}
+    }
+
+
+def default_data():
+    return {
+        "guilds": {}
+    }
 
 
 # ============================================================
-# FILE HELPERS
+# SAFE DATA NORMALIZATION
 # ============================================================
 
-def load_json(
-    file_path,
-    default
-):
-    if not os.path.exists(file_path):
-        return (
-            default.copy()
-            if isinstance(default, dict)
-            else default
+def normalize_data(data):
+
+    # This is the important fix.
+    # If something returns a string/list/etc.,
+    # never call .setdefault() on it.
+
+    if not isinstance(data, dict):
+        data = default_data()
+
+    guilds = data.get("guilds")
+
+    if not isinstance(guilds, dict):
+        data["guilds"] = {}
+        guilds = data["guilds"]
+
+    for guild_id in list(guilds.keys()):
+
+        guild_data = guilds[guild_id]
+
+        if not isinstance(guild_data, dict):
+            guilds[guild_id] = default_guild_data()
+            continue
+
+        if not isinstance(
+            guild_data.get("pending"),
+            dict
+        ):
+            guild_data["pending"] = {}
+
+        if not isinstance(
+            guild_data.get("clans"),
+            dict
+        ):
+            guild_data["clans"] = {}
+
+        guild_data.setdefault(
+            "application_channel_id",
+            None
         )
+
+        guild_data.setdefault(
+            "log_channel_id",
+            None
+        )
+
+    return data
+
+
+# ============================================================
+# LOAD DATA
+# ============================================================
+
+def load_data():
+
+    if not os.path.exists(DATA_FILE):
+        return default_data()
 
     try:
 
         with open(
-            file_path,
+            DATA_FILE,
             "r",
             encoding="utf-8"
         ) as file:
 
             data = json.load(file)
 
-        return data
+        return normalize_data(data)
 
-    except Exception as e:
+    except Exception as error:
 
         print(
-            f"❌ Failed reading {file_path}: {e}"
+            f"[CLAN] Data loading failed: {error}"
         )
 
-        return (
-            default.copy()
-            if isinstance(default, dict)
-            else default
-        )
+        return default_data()
 
 
-def save_json(
-    file_path,
-    data
+clan_data = load_data()
+
+
+# ============================================================
+# SAVE DATA
+# ============================================================
+
+async def save_data():
+
+    async with data_lock:
+
+        try:
+
+            global clan_data
+
+            clan_data = normalize_data(
+                clan_data
+            )
+
+            temporary_file = DATA_FILE + ".tmp"
+
+            with open(
+                temporary_file,
+                "w",
+                encoding="utf-8"
+            ) as file:
+
+                json.dump(
+                    clan_data,
+                    file,
+                    indent=4,
+                    ensure_ascii=False
+                )
+
+            os.replace(
+                temporary_file,
+                DATA_FILE
+            )
+
+        except Exception as error:
+
+            print(
+                f"[CLAN] Data saving failed: {error}"
+            )
+
+
+# ============================================================
+# GET GUILD DATA
+# ============================================================
+
+def get_guild_data(
+    guild_id: int
 ):
+
+    global clan_data
+
+    clan_data = normalize_data(
+        clan_data
+    )
+
+    guilds = clan_data["guilds"]
+
+    guild_id = str(guild_id)
+
+    if guild_id not in guilds:
+
+        guilds[guild_id] = (
+            default_guild_data()
+        )
+
+    if not isinstance(
+        guilds[guild_id],
+        dict
+    ):
+
+        guilds[guild_id] = (
+            default_guild_data()
+        )
+
+    guild_data = guilds[guild_id]
+
+    if not isinstance(
+        guild_data.get("pending"),
+        dict
+    ):
+
+        guild_data["pending"] = {}
+
+    if not isinstance(
+        guild_data.get("clans"),
+        dict
+    ):
+
+        guild_data["clans"] = {}
+
+    return guild_data
+
+
+# ============================================================
+# DISCORD HELPERS
+# ============================================================
+
+def get_channel(
+    guild: discord.Guild,
+    channel_id
+):
+
+    if not channel_id:
+        return None
+
+    try:
+        return guild.get_channel(
+            int(channel_id)
+        )
+    except Exception:
+        return None
+
+
+def get_role(
+    guild: discord.Guild,
+    role_id
+):
+
+    if not role_id:
+        return None
+
+    try:
+        return guild.get_role(
+            int(role_id)
+        )
+    except Exception:
+        return None
+
+
+# ============================================================
+# MODERATOR CHECK
+# ============================================================
+
+def is_moderator(
+    member: discord.Member
+):
+
+    if member.guild_permissions.administrator:
+        return True
+
+    role = discord.utils.get(
+        member.guild.roles,
+        name=MODERATOR_ROLE_NAME
+    )
+
+    return bool(
+        role and role in member.roles
+    )
+
+
+# ============================================================
+# FIND CLAN
+# ============================================================
+
+def find_clan(
+    guild: discord.Guild,
+    clan_id: str
+):
+
+    data = get_guild_data(
+        guild.id
+    )
+
+    return data["clans"].get(
+        str(clan_id)
+    )
+
+
+def find_member_clan(
+    guild: discord.Guild,
+    member: discord.Member
+):
+
+    data = get_guild_data(
+        guild.id
+    )
+
+    for clan_id, clan in data[
+        "clans"
+    ].items():
+
+        if int(
+            clan.get("owner_id", 0)
+        ) == member.id:
+
+            return clan_id, clan
+
+        if member.id in [
+            int(x)
+            for x in clan.get(
+                "leaders",
+                []
+            )
+        ]:
+
+            return clan_id, clan
+
+        member_role = get_role(
+            guild,
+            clan.get(
+                "member_role_id"
+            )
+        )
+
+        moderator_role = get_role(
+            guild,
+            clan.get(
+                "clan_moderator_role_id"
+            )
+        )
+
+        leader_role = get_role(
+            guild,
+            clan.get(
+                "leader_role_id"
+            )
+        )
+
+        if (
+            member_role
+            and member_role in member.roles
+        ):
+            return clan_id, clan
+
+        if (
+            moderator_role
+            and moderator_role in member.roles
+        ):
+            return clan_id, clan
+
+        if (
+            leader_role
+            and leader_role in member.roles
+        ):
+            return clan_id, clan
+
+    return None, None
+
+
+# ============================================================
+# LEADER CHECK
+# ============================================================
+
+def is_clan_leader(
+    member: discord.Member,
+    clan: dict
+):
+
+    if member.guild_permissions.administrator:
+        return True
+
+    if member.id == int(
+        clan.get("owner_id", 0)
+    ):
+        return True
+
+    if member.id in [
+        int(x)
+        for x in clan.get(
+            "leaders",
+            []
+        )
+    ]:
+        return True
+
+    role = get_role(
+        member.guild,
+        clan.get(
+            "leader_role_id"
+        )
+    )
+
+    return bool(
+        role and role in member.roles
+    )
+
+
+# ============================================================
+# CLAN MODERATOR CHECK
+# ============================================================
+
+def can_manage_members(
+    member: discord.Member,
+    clan: dict
+):
+
+    if is_clan_leader(
+        member,
+        clan
+    ):
+        return True
+
+    role = get_role(
+        member.guild,
+        clan.get(
+            "clan_moderator_role_id"
+        )
+    )
+
+    return bool(
+        role and role in member.roles
+    )
+
+
+# ============================================================
+# LOG
+# ============================================================
+
+async def clan_log(
+    guild,
+    title,
+    description,
+    color=discord.Color.blurple()
+):
+
+    data = get_guild_data(
+        guild.id
+    )
+
+    channel = get_channel(
+        guild,
+        data.get(
+            "log_channel_id"
+        )
+    )
+
+    if not channel:
+        return
+
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=color,
+        timestamp=discord.utils.utcnow()
+    )
 
     try:
 
-        directory = os.path.dirname(
-            file_path
+        await channel.send(
+            embed=embed
         )
 
-        if directory:
-            os.makedirs(
-                directory,
-                exist_ok=True
+    except Exception:
+        pass
+
+
+# ============================================================
+# APPLICATION FORM
+# ============================================================
+
+class ClanApplicationModal(
+    ui.Modal,
+    title="Create Clan Application"
+):
+
+    clan_name = ui.TextInput(
+        label="Clan Name",
+        placeholder="Shadow Wolves",
+        max_length=50,
+        required=True
+    )
+
+    category_name = ui.TextInput(
+        label="Category Name",
+        placeholder="SHADOW WOLVES",
+        max_length=50,
+        required=True
+    )
+
+    member_role_name = ui.TextInput(
+        label="Member Role",
+        placeholder="Shadow Wolves Member",
+        max_length=50,
+        required=True
+    )
+
+    leader_role_name = ui.TextInput(
+        label="Leader Role",
+        placeholder="Shadow Wolves Leader",
+        max_length=50,
+        required=True
+    )
+
+    async def on_submit(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        guild = interaction.guild
+
+        if guild is None:
+
+            await interaction.response.send_message(
+                "❌ This can only be used in a server.",
+                ephemeral=True
             )
 
-        temporary_file = (
-            file_path + ".tmp"
+            return
+
+        data = get_guild_data(
+            guild.id
         )
 
-        with open(
-            temporary_file,
-            "w",
-            encoding="utf-8"
-        ) as file:
+        approval_channel = get_channel(
+            guild,
+            data.get(
+                "application_channel_id"
+            )
+        )
 
-            json.dump(
-                data,
-                file,
-                indent=4,
-                ensure_ascii=False
+        if not approval_channel:
+
+            await interaction.response.send_message(
+                "❌ The clan application channel has not been configured.",
+                ephemeral=True
             )
 
-        os.replace(
-            temporary_file,
-            file_path
+            return
+
+        clan_name = (
+            self.clan_name.value
+            .strip()
         )
 
-        return True
-
-    except Exception as e:
-
-        print(
-            f"❌ Failed saving {file_path}: {e}"
+        category_name = (
+            self.category_name.value
+            .strip()
         )
 
-        return False
+        member_role_name = (
+            self.member_role_name.value
+            .strip()
+        )
+
+        leader_role_name = (
+            self.leader_role_name.value
+            .strip()
+        )
+
+        # Duplicate check
+        for clan in data[
+            "clans"
+        ].values():
+
+            if str(
+                clan.get(
+                    "clan_name",
+                    ""
+                )
+            ).lower() == clan_name.lower():
+
+                await interaction.response.send_message(
+                    "❌ A clan with this name already exists.",
+                    ephemeral=True
+                )
+
+                return
+
+        application_id = str(
+            interaction.id
+        )
+
+        data["pending"][
+            application_id
+        ] = {
+
+            "application_id":
+                application_id,
+
+            "creator_id":
+                interaction.user.id,
+
+            "clan_name":
+                clan_name,
+
+            "category_name":
+                category_name,
+
+            "member_role_name":
+                member_role_name,
+
+            "leader_role_name":
+                leader_role_name,
+
+            "approval_message_id":
+                None
+        }
+
+        await save_data()
+
+        embed = discord.Embed(
+            title="⚔️ New Clan Application",
+            description=(
+                "A member has submitted "
+                "a clan application."
+            ),
+            color=discord.Color.orange()
+        )
+
+        embed.add_field(
+            name="⚔️ Clan",
+            value=clan_name,
+            inline=True
+        )
+
+        embed.add_field(
+            name="📁 Category",
+            value=category_name,
+            inline=True
+        )
+
+        embed.add_field(
+            name="👤 Member Role",
+            value=member_role_name,
+            inline=True
+        )
+
+        embed.add_field(
+            name="👑 Leader Role",
+            value=leader_role_name,
+            inline=True
+        )
+
+        embed.add_field(
+            name="Applicant",
+            value=(
+                f"{interaction.user.mention}\n"
+                f"`{interaction.user.id}`"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="Status",
+            value="⏳ Waiting for moderator",
+            inline=False
+        )
+
+        try:
+
+            message = await approval_channel.send(
+                embed=embed,
+                view=ClanApprovalView(
+                    application_id
+                )
+            )
+
+            data["pending"][
+                application_id
+            ][
+                "approval_message_id"
+            ] = message.id
+
+            await save_data()
+
+        except Exception as error:
+
+            data["pending"].pop(
+                application_id,
+                None
+            )
+
+            await save_data()
+
+            await interaction.response.send_message(
+                f"❌ Failed to send application.\n`{error}`",
+                ephemeral=True
+            )
+
+            return
+
+        await interaction.response.send_message(
+            "✅ Your clan application has been sent to the moderators.",
+            ephemeral=True
+        )
 
 
 # ============================================================
-# NAME CLEANER
+# APPLICATION FORM VIEW
 # ============================================================
 
-def clean_channel_name(name):
+class ClanApplicationView(
+    ui.View
+):
 
-    name = name.lower().strip()
+    def __init__(self):
+        super().__init__(
+            timeout=None
+        )
 
-    name = re.sub(
-        r"[^a-z0-9\-_ ]",
-        "",
-        name
+    @ui.button(
+        label="Apply for a Clan",
+        style=discord.ButtonStyle.success,
+        emoji="⚔️",
+        custom_id="clan_apply_button"
+    )
+    async def apply(
+        self,
+        interaction,
+        button
+    ):
+
+        await interaction.response.send_modal(
+            ClanApplicationModal()
+        )
+
+
+# ============================================================
+# DELETE APPLICATION MESSAGE
+# ============================================================
+
+async def delete_application_message(
+    guild,
+    application
+):
+
+    data = get_guild_data(
+        guild.id
     )
 
-    name = re.sub(
-        r"\s+",
-        "-",
-        name
+    channel = get_channel(
+        guild,
+        data.get(
+            "application_channel_id"
+        )
     )
 
-    name = re.sub(
-        r"-+",
-        "-",
-        name
+    message_id = application.get(
+        "approval_message_id"
     )
 
-    return name[:90] or "clan-channel"
+    if not channel or not message_id:
+        return
+
+    try:
+
+        message = await channel.fetch_message(
+            int(message_id)
+        )
+
+        await message.delete()
+
+    except Exception:
+        pass
 
 
 # ============================================================
-# CLAN COG
+# APPLICATION APPROVAL VIEW
 # ============================================================
 
-class Clans(commands.Cog):
+class ClanApprovalView(
+    ui.View
+):
 
     def __init__(
         self,
-        bot
+        application_id
     ):
 
-        self.bot = bot
-
-        # ----------------------------------------------------
-        # Configuration
-        # ----------------------------------------------------
-
-        self.config = load_json(
-            CONFIG_FILE,
-            DEFAULT_CONFIG
+        super().__init__(
+            timeout=None
         )
 
-        # ----------------------------------------------------
-        # Clan data
-        # ----------------------------------------------------
-
-        self.data = load_json(
-            DATA_FILE,
-            DEFAULT_DATA
+        self.application_id = str(
+            application_id
         )
 
-        # ----------------------------------------------------
-        # Ensure missing keys exist
-        # ----------------------------------------------------
-
-        self.data.setdefault(
-            "clans",
-            {}
-        )
-
-        self.data.setdefault(
-            "applications",
-            {}
-        )
-
-        self.data.setdefault(
-            "invites",
-            {}
-        )
-
-        self.config.setdefault(
-            "application_channel_id",
-            None
-        )
-
-        self.config.setdefault(
-            "clan_category_id",
-            None
-        )
-
-        self.config.setdefault(
-            "application_form_message_id",
-            None
-        )
-
-        # ----------------------------------------------------
-        # File lock
-        # ----------------------------------------------------
-
-        self.lock = asyncio.Lock()
-
-        print(
-            "=========================================="
-        )
-
-        print(
-            "🏰 CLAN SYSTEM"
-        )
-
-        print(
-            "=========================================="
-        )
-
-        print(
-            "✅ Clan system loaded"
-        )
-
-        print(
-            f"   Application channel: "
-            f"{self.config.get('application_channel_id')}"
-        )
-
-        print(
-            f"   Clan category: "
-            f"{self.config.get('clan_category_id')}"
-        )
-
-        print(
-            f"   Clans loaded: "
-            f"{len(self.data['clans'])}"
-        )
-
-
-    # ========================================================
-    # SAVE CONFIG
-    # ========================================================
-
-    def save_config(self):
-
-        return save_json(
-            CONFIG_FILE,
-            self.config
-        )
-
-
-    # ========================================================
-    # SAVE DATA
-    # ========================================================
-
-    def save_data(self):
-
-        return save_json(
-            DATA_FILE,
-            self.data
-        )
-
-
-    # ========================================================
-    # GET CLAN
-    # ========================================================
-
-    def get_clan(
-        self,
-        clan_id
-    ):
-
-        return self.data[
-            "clans"
-        ].get(
-            str(clan_id)
-        )
-
-
-    # ========================================================
-    # FIND MEMBER CLAN
-    # ========================================================
-
-    def get_member_clan(
-        self,
-        guild_id,
-        user_id
-    ):
-
-        guild_id = str(
-            guild_id
-        )
-
-        user_id = str(
-            user_id
-        )
-
-        for clan_id, clan in self.data[
-            "clans"
-        ].items():
-
-            if str(
-                clan.get("guild_id")
-            ) != guild_id:
-                continue
-
-            if str(
-                clan.get("owner_id")
-            ) == user_id:
-
-                return clan_id, clan
-
-            if user_id in clan.get(
-                "members",
-                {}
-            ):
-
-                return clan_id, clan
-
-        return None, None
-
-
-    # ========================================================
-    # GET ROLE
-    # ========================================================
-
-    def get_role(
-        self,
-        guild,
-        role_id
-    ):
-
-        if not role_id:
-            return None
-
-        try:
-
-            return guild.get_role(
-                int(role_id)
-            )
-
-        except Exception:
-
-            return None
-
-
-    # ========================================================
-    # GET CHANNEL
-    # ========================================================
-
-    def get_channel(
-        self,
-        guild,
-        channel_id
-    ):
-
-        if not channel_id:
-            return None
-
-        try:
-
-            return guild.get_channel(
-                int(channel_id)
-            )
-
-        except Exception:
-
-            return None
-
-
-    # ========================================================
-    # ADMIN CHECK
-    # ========================================================
-
-    async def admin_check(
+    async def interaction_check(
         self,
         interaction
     ):
 
-        if not interaction.user.guild_permissions.administrator:
+        if not is_moderator(
+            interaction.user
+        ):
 
             await interaction.response.send_message(
-                "❌ Only server administrators can use this.",
+                "❌ You need the MODERATOR role.",
                 ephemeral=True
             )
 
@@ -456,2172 +810,750 @@ class Clans(commands.Cog):
 
         return True
 
-
-    # ========================================================
-    # MODERATOR CHECK
-    # ========================================================
-
-    async def moderator_check(
-        self,
-        interaction
-    ):
-
-        permissions = (
-            interaction.user.guild_permissions
-        )
-
-        if permissions.administrator:
-            return True
-
-        if permissions.manage_guild:
-            return True
-
-        await interaction.response.send_message(
-            "❌ You need Moderator permissions to use this.",
-            ephemeral=True
-        )
-
-        return False
-
-
-    # ========================================================
-    # LEADER CHECK
-    # ========================================================
-
-    def is_clan_leader(
+    @ui.button(
+        label="Approve",
+        style=discord.ButtonStyle.success,
+        emoji="✅",
+        custom_id="clan_approve_button"
+    )
+    async def approve(
         self,
         interaction,
-        clan
+        button
     ):
 
-        return (
-            interaction.user.id
-            == int(clan["owner_id"])
+        guild = interaction.guild
+
+        data = get_guild_data(
+            guild.id
         )
 
-
-    # ========================================================
-    # CLAN MANAGEMENT PERMISSION
-    # ========================================================
-
-    def can_manage_clan(
-        self,
-        interaction,
-        clan
-    ):
-
-        user_id = str(
-            interaction.user.id
+        application = data[
+            "pending"
+        ].get(
+            self.application_id
         )
 
-        role = clan.get(
-            "members",
-            {}
-        ).get(
-            user_id
-        )
-
-        return role in (
-            "leader",
-            "moderator"
-        )
-
-
-    # ========================================================
-    # NEXT CLAN ID
-    # ========================================================
-
-    def next_clan_id(self):
-
-        existing = []
-
-        for value in self.data[
-            "clans"
-        ].keys():
-
-            try:
-                existing.append(
-                    int(value)
-                )
-
-            except Exception:
-                pass
-
-        return str(
-            max(existing or [0]) + 1
-        )
-
-
-    # ========================================================
-    # NEXT APPLICATION ID
-    # ========================================================
-
-    def next_application_id(self):
-
-        existing = []
-
-        for value in self.data[
-            "applications"
-        ].keys():
-
-            try:
-                existing.append(
-                    int(value)
-                )
-
-            except Exception:
-                pass
-
-        return str(
-            max(existing or [0]) + 1
-        )
-
-
-    # ========================================================
-    # SET APPLICATION CHANNEL
-    # ========================================================
-
-    @app_commands.command(
-        name="setclanapplicationchannel",
-        description="Set the clan application channel."
-    )
-    @app_commands.describe(
-        channel="Channel where applications will be posted."
-    )
-    async def setclanapplicationchannel(
-        self,
-        interaction: discord.Interaction,
-        channel: discord.TextChannel
-    ):
-
-        if not await self.admin_check(
-            interaction
-        ):
-            return
-
-        self.config[
-            "application_channel_id"
-        ] = channel.id
-
-        self.save_config()
-
-        await interaction.response.send_message(
-            f"✅ Clan application channel set to "
-            f"{channel.mention}",
-            ephemeral=True
-        )
-
-
-    # ========================================================
-    # SET CLAN CATEGORY
-    # ========================================================
-
-    @app_commands.command(
-        name="setclancategory",
-        description="Set the category used for clan channels."
-    )
-    @app_commands.describe(
-        category="Category where clan channels will be created."
-    )
-    async def setclancategory(
-        self,
-        interaction: discord.Interaction,
-        category: discord.CategoryChannel
-    ):
-
-        if not await self.admin_check(
-            interaction
-        ):
-            return
-
-        self.config[
-            "clan_category_id"
-        ] = category.id
-
-        self.save_config()
-
-        await interaction.response.send_message(
-            f"✅ Clan category set to "
-            f"{category.mention}",
-            ephemeral=True
-        )
-
-
-    # ========================================================
-    # APPLICATION MODAL
-    # ========================================================
-
-    class ClanApplicationModal(
-        discord.ui.Modal,
-        title="Clan Application"
-    ):
-
-        def __init__(
-            self,
-            cog
-        ):
-
-            super().__init__()
-
-            self.cog = cog
-
-            self.clan_name = discord.ui.TextInput(
-                label="Clan Name",
-                placeholder="Enter your clan name",
-                required=True,
-                max_length=50
-            )
-
-            self.game = discord.ui.TextInput(
-                label="Game / Category",
-                placeholder="Example: Valorant, GTA, Minecraft",
-                required=True,
-                max_length=50
-            )
-
-            self.description = discord.ui.TextInput(
-                label="Clan Description",
-                placeholder="Tell us about your clan",
-                required=True,
-                style=discord.TextStyle.paragraph,
-                max_length=1000
-            )
-
-            self.requirements = discord.ui.TextInput(
-                label="Member Requirements",
-                placeholder="What are you looking for?",
-                required=False,
-                style=discord.TextStyle.paragraph,
-                max_length=1000
-            )
-
-            self.add_item(
-                self.clan_name
-            )
-
-            self.add_item(
-                self.game
-            )
-
-            self.add_item(
-                self.description
-            )
-
-            self.add_item(
-                self.requirements
-            )
-
-
-        async def on_submit(
-            self,
-            interaction: discord.Interaction
-        ):
-
-            cog = self.cog
-
-            channel_id = cog.config.get(
-                "application_channel_id"
-            )
-
-            if not channel_id:
-
-                await interaction.response.send_message(
-                    "❌ Clan applications are not configured yet.",
-                    ephemeral=True
-                )
-
-                return
-
-            channel = interaction.guild.get_channel(
-                int(channel_id)
-            )
-
-            if not channel:
-
-                await interaction.response.send_message(
-                    "❌ The configured application channel "
-                    "could not be found.",
-                    ephemeral=True
-                )
-
-                return
-
-            # ------------------------------------------------
-            # Prevent duplicate applications
-            # ------------------------------------------------
-
-            for application in cog.data[
-                "applications"
-            ].values():
-
-                if (
-                    str(application.get("guild_id"))
-                    == str(interaction.guild.id)
-                    and str(application.get("user_id"))
-                    == str(interaction.user.id)
-                    and application.get("status")
-                    == "pending"
-                ):
-
-                    await interaction.response.send_message(
-                        "❌ You already have a pending clan application.",
-                        ephemeral=True
-                    )
-
-                    return
-
-            application_id = (
-                cog.next_application_id()
-            )
-
-            application = {
-
-                "id": application_id,
-
-                "guild_id": interaction.guild.id,
-
-                "user_id": interaction.user.id,
-
-                "clan_name": str(
-                    self.clan_name.value
-                ),
-
-                "category": str(
-                    self.game.value
-                ),
-
-                "description": str(
-                    self.description.value
-                ),
-
-                "requirements": str(
-                    self.requirements.value
-                ),
-
-                "status": "pending",
-
-                "message_id": None
-
-            }
-
-            cog.data[
-                "applications"
-            ][application_id] = application
-
-            cog.save_data()
-
-            # ------------------------------------------------
-            # Application embed
-            # ------------------------------------------------
-
-            embed = discord.Embed(
-                title="📋 New Clan Application",
-                description=(
-                    f"{interaction.user.mention} submitted "
-                    f"a new clan application."
-                ),
-                color=discord.Color.blurple(),
-                timestamp=discord.utils.utcnow()
-            )
-
-            embed.add_field(
-                name="👤 Applicant",
-                value=(
-                    f"{interaction.user.mention}\n"
-                    f"`{interaction.user.id}`"
-                ),
-                inline=False
-            )
-
-            embed.add_field(
-                name="🏰 Clan Name",
-                value=self.clan_name.value,
-                inline=True
-            )
-
-            embed.add_field(
-                name="🎮 Game / Category",
-                value=self.game.value,
-                inline=True
-            )
-
-            embed.add_field(
-                name="📝 Description",
-                value=self.description.value[:1024],
-                inline=False
-            )
-
-            if self.requirements.value:
-
-                embed.add_field(
-                    name="📌 Requirements",
-                    value=self.requirements.value[:1024],
-                    inline=False
-                )
-
-            embed.set_footer(
-                text=f"Application ID: {application_id}"
-            )
-
-            # ------------------------------------------------
-            # Send application
-            # ------------------------------------------------
-
-            message = await channel.send(
-                embed=embed,
-                view=cog.ApplicationReviewView(
-                    cog,
-                    application_id
-                )
-            )
-
-            application[
-                "message_id"
-            ] = message.id
-
-            cog.save_data()
+        if not application:
 
             await interaction.response.send_message(
-                "✅ Your clan application has been submitted!\n"
-                "A moderator will review it.",
-                ephemeral=True
-            )
-
-
-    # ========================================================
-    # APPLICATION BUTTON
-    # ========================================================
-
-    class ApplicationButton(
-        discord.ui.Button
-    ):
-
-        def __init__(
-            self,
-            cog
-        ):
-
-            super().__init__(
-                label="Apply for a Clan",
-                emoji="📝",
-                style=discord.ButtonStyle.primary,
-                custom_id="clan_application_button"
-            )
-
-            self.cog = cog
-
-
-        async def callback(
-            self,
-            interaction
-        ):
-
-            await interaction.response.send_modal(
-                self.cog.ClanApplicationModal(
-                    self.cog
-                )
-            )
-
-
-    # ========================================================
-    # APPLICATION FORM VIEW
-    # ========================================================
-
-    class ApplicationFormView(
-        discord.ui.View
-    ):
-
-        def __init__(
-            self,
-            cog
-        ):
-
-            super().__init__(
-                timeout=None
-            )
-
-            self.add_item(
-                cog.ApplicationButton(
-                    cog
-                )
-            )
-
-
-    # ========================================================
-    # POST CLAN FORM
-    # ========================================================
-
-    @app_commands.command(
-        name="postclanform",
-        description="Post the clan application form."
-    )
-    async def postclanform(
-        self,
-        interaction
-    ):
-
-        if not await self.admin_check(
-            interaction
-        ):
-            return
-
-        channel_id = self.config.get(
-            "application_channel_id"
-        )
-
-        if not channel_id:
-
-            await interaction.response.send_message(
-                "❌ Set the application channel first.",
+                "❌ This application no longer exists.",
                 ephemeral=True
             )
 
             return
 
-        channel = interaction.guild.get_channel(
-            int(channel_id)
-        )
-
-        if not channel:
-
-            await interaction.response.send_message(
-                "❌ Application channel not found.",
-                ephemeral=True
-            )
-
-            return
-
-        embed = discord.Embed(
-            title="🏰 Create Your Clan",
-            description=(
-                "Want to create your own clan?\n\n"
-                "Click **📝 Apply for a Clan** below "
-                "and fill in the application form.\n\n"
-                "A moderator will review your application."
-            ),
-            color=discord.Color.blurple()
-        )
-
-        message = await channel.send(
-            embed=embed,
-            view=self.ApplicationFormView(
-                self
-            )
-        )
-
-        self.config[
-            "application_form_message_id"
-        ] = message.id
-
-        self.save_config()
-
-        await interaction.response.send_message(
-            f"✅ Clan application form posted in "
-            f"{channel.mention}",
-            ephemeral=True
-        )
-
-
-    # ========================================================
-    # DELETE APPLICATION MESSAGE
-    # ========================================================
-
-    async def delete_application_message(
-        self,
-        guild,
-        application
-    ):
-
-        message_id = application.get(
-            "message_id"
-        )
-
-        if not message_id:
-            return
-
-        channel_id = self.config.get(
-            "application_channel_id"
-        )
-
-        if not channel_id:
-            return
-
-        channel = guild.get_channel(
-            int(channel_id)
-        )
-
-        if not channel:
-            return
+        await interaction.response.defer()
 
         try:
 
-            message = await channel.fetch_message(
-                int(message_id)
+            # --------------------------------------------
+            # CREATE ROLES
+            # --------------------------------------------
+
+            member_role = await guild.create_role(
+                name=application[
+                    "member_role_name"
+                ],
+                reason="Clan member role"
             )
 
-            await message.delete(
-                reason="Clan application decision"
+            leader_role = await guild.create_role(
+                name=application[
+                    "leader_role_name"
+                ],
+                reason="Clan leader role"
             )
 
-        except discord.NotFound:
-
-            pass
-
-        except discord.Forbidden:
-
-            print(
-                "❌ Bot cannot delete clan application message."
-            )
-
-        except Exception as e:
-
-            print(
-                f"⚠️ Could not delete application message: {e}"
-            )
-
-
-    # ========================================================
-    # APPLICATION REVIEW VIEW
-    # ========================================================
-
-    class ApplicationReviewView(
-        discord.ui.View
-    ):
-
-        def __init__(
-            self,
-            cog,
-            application_id
-        ):
-
-            super().__init__(
-                timeout=None
-            )
-
-            self.cog = cog
-
-            self.application_id = str(
-                application_id
-            )
-
-
-        @discord.ui.button(
-            label="Approve",
-            emoji="✅",
-            style=discord.ButtonStyle.success,
-            custom_id="clan_application_approve"
-        )
-        async def approve(
-            self,
-            interaction,
-            button
-        ):
-
-            if not await self.cog.moderator_check(
-                interaction
-            ):
-                return
-
-            application = self.cog.data[
-                "applications"
-            ].get(
-                self.application_id
-            )
-
-            if not application:
-
-                await interaction.response.send_message(
-                    "❌ Application no longer exists.",
-                    ephemeral=True
-                )
-
-                return
-
-            if application.get(
-                "status"
-            ) != "pending":
-
-                await interaction.response.send_message(
-                    "❌ This application has already been processed.",
-                    ephemeral=True
-                )
-
-                return
-
-            await interaction.response.defer(
-                ephemeral=True
-            )
-
-            try:
-
-                application[
-                    "status"
-                ] = "approved"
-
-                self.cog.save_data()
-
-                clan = await self.cog.create_clan_from_application(
-                    interaction.guild,
-                    application
-                )
-
-                if clan is None:
-
+            moderator_role = await guild.create_role(
+                name=(
                     application[
-                        "status"
-                    ] = "pending"
-
-                    self.cog.save_data()
-
-                    await interaction.followup.send(
-                        "❌ The clan could not be created. "
-                        "Check the bot's permissions.",
-                        ephemeral=True
-                    )
-
-                    return
-
-                # ------------------------------------------------
-                # Delete application post
-                # ------------------------------------------------
-
-                await self.cog.delete_application_message(
-                    interaction.guild,
-                    application
-                )
-
-                await interaction.followup.send(
-                    f"✅ Clan **{clan['name']}** approved and created.",
-                    ephemeral=True
-                )
-
-            except Exception as e:
-
-                application[
-                    "status"
-                ] = "pending"
-
-                self.cog.save_data()
-
-                print(
-                    f"❌ Clan approval error: {e}"
-                )
-
-                await interaction.followup.send(
-                    f"❌ Failed to create the clan:\n`{e}`",
-                    ephemeral=True
-                )
-
-
-        @discord.ui.button(
-            label="Reject",
-            emoji="❌",
-            style=discord.ButtonStyle.danger,
-            custom_id="clan_application_reject"
-        )
-        async def reject(
-            self,
-            interaction,
-            button
-        ):
-
-            if not await self.cog.moderator_check(
-                interaction
-            ):
-                return
-
-            application = self.cog.data[
-                "applications"
-            ].get(
-                self.application_id
+                        "clan_name"
+                    ]
+                    + " Moderator"
+                ),
+                reason="Clan moderator role"
             )
 
-            if not application:
+            # --------------------------------------------
+            # CREATE CATEGORY
+            # --------------------------------------------
 
-                await interaction.response.send_message(
-                    "❌ Application no longer exists.",
-                    ephemeral=True
+            category = await guild.create_category(
+                name=application[
+                    "category_name"
+                ],
+                reason="Clan category"
+            )
+
+            everyone = guild.default_role
+
+            # Everyone cannot see clan
+            await category.set_permissions(
+                everyone,
+                view_channel=False
+            )
+
+            # Members
+            await category.set_permissions(
+                member_role,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                connect=True,
+                speak=True,
+                stream=True
+            )
+
+            # Clan moderators
+            await category.set_permissions(
+                moderator_role,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_messages=True,
+                manage_threads=True,
+                connect=True,
+                speak=True,
+                move_members=True,
+                mute_members=True,
+                deafen_members=True
+            )
+
+            # Leaders have full category management
+            await category.set_permissions(
+                leader_role,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+                manage_permissions=True,
+                manage_messages=True,
+                manage_threads=True,
+                create_public_threads=True,
+                create_private_threads=True,
+                connect=True,
+                speak=True,
+                stream=True,
+                move_members=True,
+                mute_members=True,
+                deafen_members=True
+            )
+
+            # --------------------------------------------
+            # MEMBER CHAT
+            # --------------------------------------------
+
+            clan_chat = await guild.create_text_channel(
+                name="clan-chat",
+                category=category,
+                reason="Clan member chat"
+            )
+
+            await clan_chat.set_permissions(
+                everyone,
+                view_channel=False
+            )
+
+            await clan_chat.set_permissions(
+                member_role,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True
+            )
+
+            await clan_chat.set_permissions(
+                moderator_role,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_messages=True
+            )
+
+            await clan_chat.set_permissions(
+                leader_role,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+                manage_permissions=True,
+                manage_messages=True,
+                manage_threads=True
+            )
+
+            # --------------------------------------------
+            # GENERAL VOICE
+            # --------------------------------------------
+
+            general_voice = await guild.create_voice_channel(
+                name="general-voice",
+                category=category,
+                reason="Clan voice"
+            )
+
+            await general_voice.set_permissions(
+                everyone,
+                view_channel=False,
+                connect=False
+            )
+
+            await general_voice.set_permissions(
+                member_role,
+                view_channel=True,
+                connect=True,
+                speak=True,
+                stream=True
+            )
+
+            await general_voice.set_permissions(
+                moderator_role,
+                view_channel=True,
+                connect=True,
+                speak=True,
+                move_members=True,
+                mute_members=True,
+                deafen_members=True
+            )
+
+            await general_voice.set_permissions(
+                leader_role,
+                view_channel=True,
+                connect=True,
+                speak=True,
+                stream=True,
+                move_members=True,
+                mute_members=True,
+                deafen_members=True,
+                manage_channels=True,
+                manage_permissions=True
+            )
+
+            # --------------------------------------------
+            # LEADER CATEGORY
+            # --------------------------------------------
+
+            leader_category = await guild.create_category(
+                name=(
+                    application[
+                        "category_name"
+                    ]
+                    + " • LEADERS"
+                ),
+                reason="Clan leader category"
+            )
+
+            await leader_category.set_permissions(
+                everyone,
+                view_channel=False
+            )
+
+            await leader_category.set_permissions(
+                leader_role,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+                manage_permissions=True,
+                manage_messages=True,
+                manage_threads=True,
+                connect=True,
+                speak=True,
+                move_members=True,
+                mute_members=True,
+                deafen_members=True
+            )
+
+            # --------------------------------------------
+            # LEADER MANAGEMENT CHANNEL
+            # --------------------------------------------
+
+            management_channel = await guild.create_text_channel(
+                name="clan-management",
+                category=leader_category,
+                reason="Clan leader management"
+            )
+
+            await management_channel.set_permissions(
+                everyone,
+                view_channel=False
+            )
+
+            await management_channel.set_permissions(
+                leader_role,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+                manage_permissions=True,
+                manage_messages=True
+            )
+
+            # --------------------------------------------
+            # LEADER VOICE
+            # --------------------------------------------
+
+            leader_voice = await guild.create_voice_channel(
+                name="leader-voice",
+                category=leader_category,
+                reason="Clan leader voice"
+            )
+
+            await leader_voice.set_permissions(
+                everyone,
+                view_channel=False,
+                connect=False
+            )
+
+            await leader_voice.set_permissions(
+                leader_role,
+                view_channel=True,
+                connect=True,
+                speak=True,
+                stream=True,
+                move_members=True,
+                mute_members=True,
+                deafen_members=True,
+                manage_channels=True,
+                manage_permissions=True
+            )
+
+            # --------------------------------------------
+            # CREATOR
+            # --------------------------------------------
+
+            owner = guild.get_member(
+                int(
+                    application[
+                        "creator_id"
+                    ]
+                )
+            )
+
+            if owner:
+
+                await owner.add_roles(
+                    leader_role,
+                    reason="Clan owner"
                 )
 
-                return
+            # --------------------------------------------
+            # SAVE CLAN
+            # --------------------------------------------
 
-            if application.get(
-                "status"
-            ) != "pending":
+            clan_id = str(
+                category.id
+            )
 
-                await interaction.response.send_message(
-                    "❌ This application has already been processed.",
-                    ephemeral=True
-                )
+            data["clans"][
+                clan_id
+            ] = {
 
-                return
+                "clan_id":
+                    clan_id,
 
-            application[
-                "status"
-            ] = "rejected"
+                "clan_name":
+                    application[
+                        "clan_name"
+                    ],
 
-            self.cog.save_data()
+                "owner_id":
+                    int(
+                        application[
+                            "creator_id"
+                        ]
+                    ),
 
-            await self.cog.delete_application_message(
-                interaction.guild,
+                "leaders":
+                    [
+                        int(
+                            application[
+                                "creator_id"
+                            ]
+                        )
+                    ],
+
+                "members":
+                    [
+                        int(
+                            application[
+                                "creator_id"
+                            ]
+                        )
+                    ],
+
+                "category_id":
+                    category.id,
+
+                "leader_category_id":
+                    leader_category.id,
+
+                "member_role_id":
+                    member_role.id,
+
+                "leader_role_id":
+                    leader_role.id,
+
+                "clan_moderator_role_id":
+                    moderator_role.id,
+
+                "member_text_id":
+                    clan_chat.id,
+
+                "general_voice_id":
+                    general_voice.id,
+
+                "leader_channel_id":
+                    management_channel.id,
+
+                "leader_voice_id":
+                    leader_voice.id,
+
+                "warnings":
+                    {},
+
+                "banned_members":
+                    [],
+
+                "created_at":
+                    discord.utils.utcnow().isoformat()
+            }
+
+            # Remove pending
+            data["pending"].pop(
+                self.application_id,
+                None
+            )
+
+            await save_data()
+
+            # --------------------------------------------
+            # DELETE APPLICATION
+            # --------------------------------------------
+
+            await delete_application_message(
+                guild,
                 application
             )
 
-            await interaction.response.send_message(
-                "❌ Clan application rejected and removed.",
-                ephemeral=True
-            )
-
-
-    # ========================================================
-    # CREATE CLAN
-    # ========================================================
-
-    async def create_clan_from_application(
-        self,
-        guild,
-        application
-    ):
-
-        owner = guild.get_member(
-            int(application["user_id"])
-        )
-
-        if not owner:
-            return None
-
-        clan_id = self.next_clan_id()
-
-        clan_name = application[
-            "clan_name"
-        ]
-
-        # ----------------------------------------------------
-        # Find configured category
-        # ----------------------------------------------------
-
-        category = None
-
-        category_id = self.config.get(
-            "clan_category_id"
-        )
-
-        if category_id:
-
-            category = guild.get_channel(
-                int(category_id)
-            )
-
-            if not isinstance(
-                category,
-                discord.CategoryChannel
-            ):
-
-                category = None
-
-        # ----------------------------------------------------
-        # Create fallback category
-        # ----------------------------------------------------
-
-        if category is None:
-
-            category = await guild.create_category(
-                "CLANS",
-                reason="Clan system"
-            )
-
-            self.config[
-                "clan_category_id"
-            ] = category.id
-
-            self.save_config()
-
-        # ----------------------------------------------------
-        # Create roles
-        # ----------------------------------------------------
-
-        leader_role = await guild.create_role(
-            name=f"{clan_name} Leader",
-            reason="Clan system"
-        )
-
-        moderator_role = await guild.create_role(
-            name=f"{clan_name} Moderator",
-            reason="Clan system"
-        )
-
-        member_role = await guild.create_role(
-            name=f"{clan_name} Member",
-            reason="Clan system"
-        )
-
-        # ----------------------------------------------------
-        # Move roles below bot role
-        # ----------------------------------------------------
-
-        try:
-
-            bot_member = guild.me
-
-            if bot_member:
-
-                highest_bot_role = (
-                    bot_member.top_role
-                )
-
-                target_position = max(
-                    1,
-                    highest_bot_role.position - 1
-                )
-
-                await guild.edit_role_positions(
-                    positions={
-                        leader_role: target_position
-                    },
-                    reason="Clan role hierarchy"
-                )
-
-                await guild.edit_role_positions(
-                    positions={
-                        moderator_role: max(
-                            1,
-                            target_position - 1
-                        )
-                    },
-                    reason="Clan role hierarchy"
-                )
-
-                await guild.edit_role_positions(
-                    positions={
-                        member_role: max(
-                            1,
-                            target_position - 2
-                        )
-                    },
-                    reason="Clan role hierarchy"
-                )
-
-        except Exception as e:
-
-            print(
-                f"⚠️ Could not position clan roles: {e}"
-            )
-
-        # ----------------------------------------------------
-        # Clan permissions
-        #
-        # Leader gets management permissions inside
-        # the clan channels.
-        # ----------------------------------------------------
-
-        leader_permissions = discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            read_message_history=True,
-            manage_messages=True,
-            manage_channels=True,
-            manage_permissions=True,
-            embed_links=True,
-            attach_files=True,
-            add_reactions=True,
-            use_external_emojis=True,
-            use_application_commands=True,
-            connect=True,
-            speak=True,
-            stream=True,
-            move_members=True,
-            mute_members=True,
-            deafen_members=True
-        )
-
-        moderator_permissions = discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            read_message_history=True,
-            manage_messages=True,
-            embed_links=True,
-            attach_files=True,
-            add_reactions=True,
-            connect=True,
-            speak=True
-        )
-
-        member_permissions = discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            read_message_history=True,
-            embed_links=True,
-            attach_files=True,
-            add_reactions=True,
-            connect=True,
-            speak=True
-        )
-
-        # ----------------------------------------------------
-        # Create main clan text channel
-        # ----------------------------------------------------
-
-        text_overwrites = {
-
-            guild.default_role:
-                discord.PermissionOverwrite(
-                    view_channel=False
-                ),
-
-            leader_role:
-                leader_permissions,
-
-            moderator_role:
-                moderator_permissions,
-
-            member_role:
-                member_permissions
-        }
-
-        clan_text_channel = await guild.create_text_channel(
-            clean_channel_name(
-                f"{clan_name}-chat"
-            ),
-            category=category,
-            overwrites=text_overwrites,
-            reason="Clan system"
-        )
-
-        # ----------------------------------------------------
-        # Create leader channel
-        # ----------------------------------------------------
-
-        leader_overwrites = {
-
-            guild.default_role:
-                discord.PermissionOverwrite(
-                    view_channel=False
-                ),
-
-            leader_role:
-                leader_permissions
-        }
-
-        leader_channel = await guild.create_text_channel(
-            clean_channel_name(
-                f"{clan_name}-leader"
-            ),
-            category=category,
-            overwrites=leader_overwrites,
-            reason="Clan leader management"
-        )
-
-        # ----------------------------------------------------
-        # Give owner leader role
-        # ----------------------------------------------------
-
-        try:
-
-            await owner.add_roles(
-                leader_role,
-                reason="Clan owner"
-            )
-
-        except Exception as e:
-
-            print(
-                f"❌ Could not give leader role: {e}"
-            )
-
-        # ----------------------------------------------------
-        # Clan data
-        # ----------------------------------------------------
-
-        clan = {
-
-            "id": clan_id,
-
-            "guild_id": guild.id,
-
-            "name": clan_name,
-
-            "category": application[
-                "category"
-            ],
-
-            "owner_id": owner.id,
-
-            "leader_role_id": leader_role.id,
-
-            "moderator_role_id": moderator_role.id,
-
-            "member_role_id": member_role.id,
-
-            "text_channel_id": clan_text_channel.id,
-
-            "leader_channel_id": leader_channel.id,
-
-            "members": {
-                str(owner.id): "leader"
-            },
-
-            "warnings": {},
-
-            "custom_channels": [],
-
-            "permissions": {
-
-                "invite_members": True,
-
-                "manage_members": True,
-
-                "manage_moderators": True,
-
-                "warn_members": True,
-
-                "kick_members": True,
-
-                "manage_channels": True,
-
-                "create_text_channels": True,
-
-                "create_voice_channels": True
-
-            }
-
-        }
-
-        self.data[
-            "clans"
-        ][clan_id] = clan
-
-        self.save_data()
-
-        # ----------------------------------------------------
-        # Leader panel
-        # ----------------------------------------------------
-
-        await self.send_leader_panel(
-            leader_channel,
-            clan
-        )
-
-        # ----------------------------------------------------
-        # Clan welcome
-        # ----------------------------------------------------
-
-        embed = discord.Embed(
-            title=f"🏰 {clan_name}",
-            description=(
-                "Your clan has been created successfully!"
-            ),
-            color=discord.Color.green()
-        )
-
-        embed.add_field(
-            name="👑 Leader",
-            value=owner.mention,
-            inline=True
-        )
-
-        embed.add_field(
-            name="🎮 Game",
-            value=application[
-                "category"
-            ],
-            inline=True
-        )
-
-        embed.add_field(
-            name="👥 Members",
-            value="1",
-            inline=True
-        )
-
-        embed.add_field(
-            name="💬 Clan Chat",
-            value=clan_text_channel.mention,
-            inline=False
-        )
-
-        embed.add_field(
-            name="👑 Leader Management",
-            value=leader_channel.mention,
-            inline=False
-        )
-
-        await clan_text_channel.send(
-            content=owner.mention,
-            embed=embed
-        )
-
-        # ----------------------------------------------------
-        # Notify owner
-        # ----------------------------------------------------
-
-        try:
-
-            await owner.send(
-                f"🏰 Your clan **{clan_name}** has been approved!\n\n"
-                f"👑 Leader channel: "
-                f"{leader_channel.mention}"
-            )
-
-        except Exception:
-
-            pass
-
-        return clan
-
-
-    # ========================================================
-    # BUILD LEADER PANEL EMBED
-    # ========================================================
-
-    def build_leader_embed(
-        self,
-        guild,
-        clan
-    ):
-
-        owner = guild.get_member(
-            int(clan["owner_id"])
-        )
-
-        members = clan.get(
-            "members",
-            {}
-        )
-
-        member_lines = []
-
-        for user_id, role in members.items():
-
-            member = guild.get_member(
-                int(user_id)
-            )
-
-            if member:
-
-                if role == "leader":
-                    icon = "👑"
-
-                elif role == "moderator":
-                    icon = "🛡️"
-
-                else:
-                    icon = "👤"
-
-                member_lines.append(
-                    f"{icon} {member.mention} — "
-                    f"`{role}`"
-                )
-
-        if not member_lines:
-
-            member_text = "No members."
-
-        else:
-
-            member_text = "\n".join(
-                member_lines
-            )
-
-        if len(member_text) > 1024:
-
-            member_text = (
-                member_text[:1000]
-                + "\n..."
-            )
-
-        embed = discord.Embed(
-            title=f"👑 {clan['name']} — Leader Panel",
-            description=(
-                "Manage your clan from this panel.\n"
-                "No clan commands are required."
-            ),
-            color=discord.Color.gold()
-        )
-
-        embed.add_field(
-            name="👑 Owner",
-            value=(
-                owner.mention
-                if owner
-                else "Unknown"
-            ),
-            inline=True
-        )
-
-        embed.add_field(
-            name="📊 Total Members",
-            value=str(
-                len(members)
-            ),
-            inline=True
-        )
-
-        embed.add_field(
-            name="🎮 Category",
-            value=clan.get(
-                "category",
-                "Unknown"
-            ),
-            inline=True
-        )
-
-        embed.add_field(
-            name="👥 Members",
-            value=member_text,
-            inline=False
-        )
-
-        text_channel = guild.get_channel(
-            int(clan["text_channel_id"])
-        )
-
-        leader_channel = guild.get_channel(
-            int(clan["leader_channel_id"])
-        )
-
-        embed.add_field(
-            name="💬 Clan Chat",
-            value=(
-                text_channel.mention
-                if text_channel
-                else "Missing"
-            ),
-            inline=True
-        )
-
-        embed.add_field(
-            name="👑 Management",
-            value=(
-                leader_channel.mention
-                if leader_channel
-                else "Missing"
-            ),
-            inline=True
-        )
-
-        custom_channels = clan.get(
-            "custom_channels",
-            []
-        )
-
-        embed.add_field(
-            name="📁 Custom Channels",
-            value=str(
-                len(custom_channels)
-            ),
-            inline=True
-        )
-
-        embed.set_footer(
-            text=(
-                "Clan Leader Panel • "
-                "Use the buttons below"
-            )
-        )
-
-        return embed
-
-
-    # ========================================================
-    # SEND LEADER PANEL
-    # ========================================================
-
-    async def send_leader_panel(
-        self,
-        channel,
-        clan
-    ):
-
-        embed = self.build_leader_embed(
-            channel.guild,
-            clan
-        )
-
-        await channel.send(
-            embed=embed,
-            view=self.LeaderPanelView(
-                self,
-                clan["id"]
-            )
-        )
-
-
-    # ========================================================
-    # UPDATE LEADER PANEL
-    # ========================================================
-
-    async def update_leader_panel(
-        self,
-        channel,
-        clan
-    ):
-
-        try:
-
-            await channel.send(
-                embed=self.build_leader_embed(
-                    channel.guild,
-                    clan
-                ),
-                view=self.LeaderPanelView(
-                    self,
-                    clan["id"]
+            # --------------------------------------------
+            # WELCOME
+            # --------------------------------------------
+
+            await clan_chat.send(
+                embed=discord.Embed(
+                    title=(
+                        "⚔️ "
+                        + application[
+                            "clan_name"
+                        ]
+                    ),
+                    description=(
+                        f"Welcome to "
+                        f"**{application['clan_name']}**!\n\n"
+                        f"👑 Owner: "
+                        f"{owner.mention if owner else 'Unknown'}\n\n"
+                        "Use this channel for clan communication."
+                    ),
+                    color=discord.Color.green()
                 )
             )
 
-        except Exception as e:
+            # --------------------------------------------
+            # LEADER MANAGEMENT PANEL
+            # --------------------------------------------
 
-            print(
-                f"❌ Could not refresh leader panel: {e}"
-            )
+            if owner:
 
-
-    # ========================================================
-    # INVITE MODAL
-    # ========================================================
-
-    class InviteMemberSelect(
-        discord.ui.UserSelect
-    ):
-
-        def __init__(
-            self,
-            cog,
-            clan_id
-        ):
-
-            super().__init__(
-                placeholder="Select a member to invite",
-                min_values=1,
-                max_values=1,
-                custom_id=(
-                    f"clan_invite_select_{clan_id}"
-                )
-            )
-
-            self.cog = cog
-            self.clan_id = str(
-                clan_id
-            )
-
-
-        async def callback(
-            self,
-            interaction
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
+                await send_leader_panel(
+                    guild,
+                    data["clans"][clan_id],
+                    management_channel
                 )
 
-                return
-
-            if not self.cog.can_manage_clan(
-                interaction,
-                clan
-            ):
-
-                await interaction.response.send_message(
-                    "❌ You cannot invite members.",
-                    ephemeral=True
-                )
-
-                return
-
-            member = self.values[0]
-
-            if str(member.id) in clan.get(
-                "members",
-                {}
-            ):
-
-                await interaction.response.send_message(
-                    "❌ This member is already in the clan.",
-                    ephemeral=True
-                )
-
-                return
-
-            invite_id = (
-                f"{self.clan_id}-{member.id}-"
-                f"{interaction.user.id}"
+            await interaction.followup.send(
+                f"✅ **{application['clan_name']}** has been approved."
             )
 
-            self.cog.data[
-                "invites"
-            ][invite_id] = {
-
-                "clan_id": self.clan_id,
-
-                "guild_id": interaction.guild.id,
-
-                "invited_user_id": member.id,
-
-                "invited_by": interaction.user.id
-
-            }
-
-            self.cog.save_data()
-
-            embed = discord.Embed(
-                title="🏰 Clan Invitation",
-                description=(
-                    f"You have been invited to join "
-                    f"**{clan['name']}**."
-                ),
-                color=discord.Color.blurple()
-            )
-
-            embed.add_field(
-                name="Invited by",
-                value=interaction.user.mention,
-                inline=False
-            )
-
-            try:
-
-                await member.send(
-                    embed=embed,
-                    view=self.cog.ClanInviteView(
-                        self.cog,
-                        invite_id
-                    )
-                )
-
-            except discord.Forbidden:
-
-                del self.cog.data[
-                    "invites"
-                ][invite_id]
-
-                self.cog.save_data()
-
-                await interaction.response.send_message(
-                    "❌ I cannot DM that member. "
-                    "They may have DMs disabled.",
-                    ephemeral=True
-                )
-
-                return
-
-            await interaction.response.send_message(
-                f"✅ Invitation sent to {member.mention}.",
-                ephemeral=True
-            )
-
-
-    # ========================================================
-    # INVITE VIEW
-    # ========================================================
-
-    class InviteSelectView(
-        discord.ui.View
-    ):
-
-        def __init__(
-            self,
-            cog,
-            clan_id
-        ):
-
-            super().__init__(
-                timeout=60
-            )
-
-            self.add_item(
-                cog.InviteMemberSelect(
-                    cog,
-                    clan_id
-                )
-            )
-
-
-    # ========================================================
-    # INVITATION CONFIRMATION
-    # ========================================================
-
-    class ClanInviteView(
-        discord.ui.View
-    ):
-
-        def __init__(
-            self,
-            cog,
-            invite_id
-        ):
-
-            super().__init__(
-                timeout=None
-            )
-
-            self.cog = cog
-
-            self.invite_id = str(
-                invite_id
-            )
-
-
-        @discord.ui.button(
-            label="Confirm & Join",
-            emoji="✅",
-            style=discord.ButtonStyle.success,
-            custom_id="clan_invite_confirm"
-        )
-        async def confirm(
-            self,
-            interaction,
-            button
-        ):
-
-            invite = self.cog.data[
-                "invites"
-            ].get(
-                self.invite_id
-            )
-
-            if not invite:
-
-                await interaction.response.send_message(
-                    "❌ This invitation is no longer valid.",
-                    ephemeral=True
-                )
-
-                return
-
-            if interaction.user.id != int(
-                invite["invited_user_id"]
-            ):
-
-                await interaction.response.send_message(
-                    "❌ This invitation is not for you.",
-                    ephemeral=True
-                )
-
-                return
-
-            clan = self.cog.get_clan(
-                invite["clan_id"]
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ This clan no longer exists.",
-                    ephemeral=True
-                )
-
-                return
-
-            guild = self.cog.bot.get_guild(
-                int(invite["guild_id"])
-            )
-
-            if not guild:
-
-                await interaction.response.send_message(
-                    "❌ Server not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            member = guild.get_member(
-                interaction.user.id
-            )
-
-            if not member:
-
-                await interaction.response.send_message(
-                    "❌ You are not in the server.",
-                    ephemeral=True
-                )
-
-                return
-
-            if str(member.id) in clan.get(
-                "members",
-                {}
-            ):
-
-                await interaction.response.send_message(
-                    "❌ You are already in this clan.",
-                    ephemeral=True
-                )
-
-                return
-
-            role = self.cog.get_role(
+            await clan_log(
                 guild,
-                clan.get(
-                    "member_role_id"
-                )
-            )
-
-            if role:
-
-                try:
-
-                    await member.add_roles(
-                        role,
-                        reason="Joined clan"
-                    )
-
-                except Exception as e:
-
-                    await interaction.response.send_message(
-                        f"❌ I could not give you the clan role.\n"
-                        f"`{e}`",
-                        ephemeral=True
-                    )
-
-                    return
-
-            clan[
-                "members"
-            ][
-                str(member.id)
-            ] = "member"
-
-            del self.cog.data[
-                "invites"
-            ][self.invite_id]
-
-            self.cog.save_data()
-
-            await interaction.response.send_message(
-                f"✅ You joined **{clan['name']}**!",
-                ephemeral=True
-            )
-
-            # ------------------------------------------------
-            # Notify clan
-            # ------------------------------------------------
-
-            channel = guild.get_channel(
-                int(clan["text_channel_id"])
-            )
-
-            if channel:
-
-                await channel.send(
-                    f"🎉 Welcome {member.mention} "
-                    f"to **{clan['name']}**!"
-                )
-
-            # ------------------------------------------------
-            # Refresh leader panel
-            # ------------------------------------------------
-
-            leader_channel = guild.get_channel(
-                int(clan["leader_channel_id"])
-            )
-
-            if leader_channel:
-
-                await self.cog.update_leader_panel(
-                    leader_channel,
-                    clan
-                )
-
-
-        @discord.ui.button(
-            label="Decline",
-            emoji="❌",
-            style=discord.ButtonStyle.danger,
-            custom_id="clan_invite_decline"
-        )
-        async def decline(
-            self,
-            interaction,
-            button
-        ):
-
-            invite = self.cog.data[
-                "invites"
-            ].get(
-                self.invite_id
-            )
-
-            if not invite:
-
-                await interaction.response.send_message(
-                    "❌ This invitation is no longer valid.",
-                    ephemeral=True
-                )
-
-                return
-
-            if interaction.user.id != int(
-                invite["invited_user_id"]
-            ):
-
-                await interaction.response.send_message(
-                    "❌ This invitation is not for you.",
-                    ephemeral=True
-                )
-
-                return
-
-            del self.cog.data[
-                "invites"
-            ][self.invite_id]
-
-            self.cog.save_data()
-
-            await interaction.response.send_message(
-                "❌ Clan invitation declined.",
-                ephemeral=True
-            )
-
-
-    # ========================================================
-    # MEMBER SELECT
-    # ========================================================
-
-    class ClanMemberSelect(
-        discord.ui.UserSelect
-    ):
-
-        def __init__(
-            self,
-            cog,
-            clan_id,
-            action
-        ):
-
-            super().__init__(
-                placeholder="Select a clan member",
-                min_values=1,
-                max_values=1,
-                custom_id=(
-                    f"clan_member_select_"
-                    f"{action}_"
-                    f"{clan_id}"
-                )
-            )
-
-            self.cog = cog
-            self.clan_id = str(
-                clan_id
-            )
-            self.action = action
-
-
-        async def callback(
-            self,
-            interaction
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            if not self.cog.is_clan_leader(
-                interaction,
-                clan
-            ):
-
-                await interaction.response.send_message(
-                    "❌ Only the clan leader can do this.",
-                    ephemeral=True
-                )
-
-                return
-
-            member = self.values[0]
-
-            if str(member.id) not in clan.get(
-                "members",
-                {}
-            ):
-
-                await interaction.response.send_message(
-                    "❌ That member is not in your clan.",
-                    ephemeral=True
-                )
-
-                return
-
-            if member.id == int(
-                clan["owner_id"]
-            ):
-
-                await interaction.response.send_message(
-                    "❌ You cannot manage the clan owner.",
-                    ephemeral=True
-                )
-
-                return
-
-            if self.action == "manage":
-
-                await interaction.response.send_message(
-                    embed=self.cog.build_member_manage_embed(
-                        member,
-                        clan
-                    ),
-                    view=self.cog.MemberManageView(
-                        self.cog,
-                        self.clan_id,
-                        member.id
-                    ),
-                    ephemeral=True
-                )
-
-                return
-
-            if self.action == "warn":
-
-                await interaction.response.send_modal(
-                    self.cog.WarnModal(
-                        self.cog,
-                        self.clan_id,
-                        member.id
-                    )
-                )
-
-                return
-
-            if self.action == "kick":
-
-                await interaction.response.send_message(
-                    f"⚠️ Are you sure you want to kick "
-                    f"{member.mention}?",
-                    view=self.cog.KickConfirmView(
-                        self.cog,
-                        self.clan_id,
-                        member.id
-                    ),
-                    ephemeral=True
-                )
-
-                return
-
-
-    # ========================================================
-    # MEMBER SELECT VIEW
-    # ========================================================
-
-    class ClanMemberSelectView(
-        discord.ui.View
-    ):
-
-        def __init__(
-            self,
-            cog,
-            clan_id,
-            action
-        ):
-
-            super().__init__(
-                timeout=60
-            )
-
-            self.add_item(
-                cog.ClanMemberSelect(
-                    cog,
-                    clan_id,
-                    action
-                )
-            )
-
-
-    # ========================================================
-    # MEMBER MANAGEMENT EMBED
-    # ========================================================
-
-    def build_member_manage_embed(
-        self,
-        member,
-        clan
-    ):
-
-        role = clan.get(
-            "members",
-            {}
-        ).get(
-            str(member.id),
-            "member"
-        )
-
-        warning_count = len(
-            clan.get(
-                "warnings",
-                {}
-            ).get(
-                str(member.id),
-                []
-            )
-        )
-
-        embed = discord.Embed(
-            title=f"👤 Manage {member.display_name}",
-            color=discord.Color.blurple()
-        )
-
-        embed.add_field(
-            name="Member",
-            value=member.mention,
-            inline=True
-        )
-
-        embed.add_field(
-            name="Clan Role",
-            value=role.title(),
-            inline=True
-        )
-
-        embed.add_field(
-            name="⚠️ Warnings",
-            value=str(
-                warning_count
-            ),
-            inline=True
-        )
-
-        return embed
-
-
-    # ========================================================
-    # MEMBER MANAGEMENT VIEW
-    # ========================================================
-
-    class MemberManageView(
-        discord.ui.View
-    ):
-
-        def __init__(
-            self,
-            cog,
-            clan_id,
-            member_id
-        ):
-
-            super().__init__(
-                timeout=120
-            )
-
-            self.cog = cog
-
-            self.clan_id = str(
-                clan_id
-            )
-
-            self.member_id = int(
-                member_id
-            )
-
-
-        @discord.ui.button(
-            label="Make Moderator",
-            emoji="🛡️",
-            style=discord.ButtonStyle.primary
-        )
-        async def moderator(
-            self,
-            interaction,
-            button
-        ):
-
-            await self.cog.set_member_role(
-                interaction,
-                self.clan_id,
-                self.member_id,
-                "moderator"
-            )
-
-
-        @discord.ui.button(
-            label="Make Member",
-            emoji="👤",
-            style=discord.ButtonStyle.secondary
-        )
-        async def member(
-            self,
-            interaction,
-            button
-        ):
-
-            await self.cog.set_member_role(
-                interaction,
-                self.clan_id,
-                self.member_id,
-                "member"
-            )
-
-
-        @discord.ui.button(
-            label="Warn",
-            emoji="⚠️",
-            style=discord.ButtonStyle.danger
-        )
-        async def warn(
-            self,
-            interaction,
-            button
-        ):
-
-            await interaction.response.send_modal(
-                self.cog.WarnModal(
-                    self.cog,
-                    self.clan_id,
-                    self.member_id
-                )
-            )
-
-
-        @discord.ui.button(
-            label="Kick",
-            emoji="👢",
-            style=discord.ButtonStyle.danger
-        )
-        async def kick(
-            self,
-            interaction,
-            button
-        ):
-
-            await interaction.response.send_message(
-                "⚠️ Confirm removing this member?",
-                view=self.cog.KickConfirmView(
-                    self.cog,
-                    self.clan_id,
-                    self.member_id
+                "Clan Approved",
+                (
+                    f"**{application['clan_name']}** "
+                    f"was approved by "
+                    f"{interaction.user.mention}."
                 ),
+                discord.Color.green()
+            )
+
+        except Exception as error:
+
+            await interaction.followup.send(
+                f"❌ Clan creation failed:\n`{error}`",
                 ephemeral=True
             )
 
-
-    # ========================================================
-    # SET MEMBER ROLE
-    # ========================================================
-
-    async def set_member_role(
+    @ui.button(
+        label="Reject",
+        style=discord.ButtonStyle.danger,
+        emoji="❌",
+        custom_id="clan_reject_button"
+    )
+    async def reject(
         self,
         interaction,
-        clan_id,
-        member_id,
-        role_type
+        button
     ):
 
-        clan = self.get_clan(
+        guild = interaction.guild
+
+        data = get_guild_data(
+            guild.id
+        )
+
+        application = data[
+            "pending"
+        ].get(
+            self.application_id
+        )
+
+        if not application:
+
+            await interaction.response.send_message(
+                "❌ Application no longer exists.",
+                ephemeral=True
+            )
+
+            return
+
+        data["pending"].pop(
+            self.application_id,
+            None
+        )
+
+        await save_data()
+
+        await delete_application_message(
+            guild,
+            application
+        )
+
+        await interaction.response.send_message(
+            f"❌ **{application['clan_name']}** was rejected.",
+            ephemeral=True
+        )
+
+        await clan_log(
+            guild,
+            "Clan Application Rejected",
+            (
+                f"**{application['clan_name']}** "
+                f"was rejected by "
+                f"{interaction.user.mention}."
+            ),
+            discord.Color.red()
+        )
+
+
+# ============================================================
+# LEADER PANEL EMBED
+# ============================================================
+
+async def build_leader_embed(
+    guild,
+    clan
+):
+
+    members = []
+
+    for member_id in clan.get(
+        "members",
+        []
+    ):
+
+        member = guild.get_member(
+            int(member_id)
+        )
+
+        if member:
+            members.append(member)
+
+    lines = []
+
+    for member in members:
+
+        role = "Member"
+
+        leader_role = get_role(
+            guild,
+            clan.get(
+                "leader_role_id"
+            )
+        )
+
+        moderator_role = get_role(
+            guild,
+            clan.get(
+                "clan_moderator_role_id"
+            )
+        )
+
+        if (
+            leader_role
+            and leader_role in member.roles
+        ):
+
+            role = "Leader"
+
+        elif (
+            moderator_role
+            and moderator_role in member.roles
+        ):
+
+            role = "Clan Moderator"
+
+        status = (
+            "🟢"
+            if member.status != discord.Status.offline
+            else "⚫"
+        )
+
+        lines.append(
+            f"{status} {member.mention} — **{role}**"
+        )
+
+    if not lines:
+        lines = [
+            "No members recorded."
+        ]
+
+    embed = discord.Embed(
+        title=(
+            f"⚔️ {clan['clan_name']} "
+            f"— Management"
+        ),
+        description="\n".join(
+            lines[:50]
+        ),
+        color=discord.Color.blurple()
+    )
+
+    embed.add_field(
+        name="👥 Total Members",
+        value=str(
+            len(
+                clan.get(
+                    "members",
+                    []
+                )
+            )
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="👑 Owner",
+        value=(
+            f"<@{clan['owner_id']}>"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="📁 Clan Category",
+        value=(
+            f"<#{clan['category_id']}>"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="💬 Clan Chat",
+        value=(
+            f"<#{clan['member_text_id']}>"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="🎙️ Voice",
+        value=(
+            f"<#{clan['general_voice_id']}>"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="📋 Management",
+        value=(
+            f"<#{clan['leader_channel_id']}>"
+        ),
+        inline=True
+    )
+
+    embed.set_footer(
+        text="Clan Management System"
+    )
+
+    return embed
+
+
+# ============================================================
+# LEADER MEMBER SELECT
+# ============================================================
+
+class ClanMemberSelect(
+    ui.Select
+):
+
+    def __init__(
+        self,
+        clan_id,
+        members
+    ):
+
+        self.clan_id = str(
             clan_id
+        )
+
+        options = []
+
+        for member in members[:25]:
+
+            options.append(
+                discord.SelectOption(
+                    label=member.display_name[
+                        :100
+                    ],
+                    value=str(
+                        member.id
+                    )
+                )
+            )
+
+        if not options:
+
+            options.append(
+                discord.SelectOption(
+                    label="No members",
+                    value="0"
+                )
+            )
+
+        super().__init__(
+            placeholder="Select a member",
+            options=options,
+            min_values=1,
+            max_values=1
+        )
+
+    async def callback(
+        self,
+        interaction
+    ):
+
+        clan = find_clan(
+            interaction.guild,
+            self.clan_id
         )
 
         if not clan:
@@ -2633,32 +1565,24 @@ class Clans(commands.Cog):
 
             return
 
-        if not self.is_clan_leader(
-            interaction,
+        if not can_manage_members(
+            interaction.user,
             clan
         ):
 
             await interaction.response.send_message(
-                "❌ Only the clan leader can change roles.",
+                "❌ You cannot manage clan members.",
                 ephemeral=True
             )
 
             return
 
-        if str(member_id) not in clan.get(
-            "members",
-            {}
-        ):
-
-            await interaction.response.send_message(
-                "❌ Member not found in clan.",
-                ephemeral=True
-            )
-
-            return
+        member_id = int(
+            self.values[0]
+        )
 
         member = interaction.guild.get_member(
-            int(member_id)
+            member_id
         )
 
         if not member:
@@ -2670,507 +1594,1088 @@ class Clans(commands.Cog):
 
             return
 
-        member_role = self.get_role(
+        await interaction.response.send_message(
+            f"Managing **{member.display_name}**",
+            view=MemberActionsView(
+                self.clan_id,
+                member.id
+            ),
+            ephemeral=True
+        )
+
+
+# ============================================================
+# MEMBER ACTIONS
+# ============================================================
+
+class MemberActionsView(
+    ui.View
+):
+
+    def __init__(
+        self,
+        clan_id,
+        member_id
+    ):
+
+        super().__init__(
+            timeout=180
+        )
+
+        self.clan_id = str(
+            clan_id
+        )
+
+        self.member_id = int(
+            member_id
+        )
+
+    def get_clan(self, interaction):
+
+        return find_clan(
+            interaction.guild,
+            self.clan_id
+        )
+
+    @ui.button(
+        label="Warn",
+        style=discord.ButtonStyle.secondary,
+        emoji="⚠️"
+    )
+    async def warn(
+        self,
+        interaction,
+        button
+    ):
+
+        clan = self.get_clan(
+            interaction
+        )
+
+        if not clan or not can_manage_members(
+            interaction.user,
+            clan
+        ):
+
+            await interaction.response.send_message(
+                "❌ You cannot manage this member.",
+                ephemeral=True
+            )
+
+            return
+
+        warnings = clan.setdefault(
+            "warnings",
+            {}
+        )
+
+        key = str(
+            self.member_id
+        )
+
+        warnings[key] = (
+            int(
+                warnings.get(
+                    key,
+                    0
+                )
+            )
+            + 1
+        )
+
+        await save_data()
+
+        member = interaction.guild.get_member(
+            self.member_id
+        )
+
+        await interaction.response.send_message(
+            (
+                f"⚠️ {member.mention if member else 'Member'} "
+                f"has been warned.\n"
+                f"Warnings: **{warnings[key]}**"
+            ),
+            ephemeral=True
+        )
+
+    @ui.button(
+        label="Kick",
+        style=discord.ButtonStyle.danger,
+        emoji="👢"
+    )
+    async def kick(
+        self,
+        interaction,
+        button
+    ):
+
+        clan = self.get_clan(
+            interaction
+        )
+
+        if not clan or not is_clan_leader(
+            interaction.user,
+            clan
+        ):
+
+            await interaction.response.send_message(
+                "❌ Only clan leaders can kick members.",
+                ephemeral=True
+            )
+
+            return
+
+        if self.member_id == int(
+            clan["owner_id"]
+        ):
+
+            await interaction.response.send_message(
+                "❌ The clan owner cannot be kicked.",
+                ephemeral=True
+            )
+
+            return
+
+        member = interaction.guild.get_member(
+            self.member_id
+        )
+
+        if not member:
+
+            await interaction.response.send_message(
+                "❌ Member not found.",
+                ephemeral=True
+            )
+
+            return
+
+        roles = [
+
+            get_role(
+                interaction.guild,
+                clan.get(
+                    "member_role_id"
+                )
+            ),
+
+            get_role(
+                interaction.guild,
+                clan.get(
+                    "clan_moderator_role_id"
+                )
+            ),
+
+            get_role(
+                interaction.guild,
+                clan.get(
+                    "leader_role_id"
+                )
+            )
+        ]
+
+        try:
+
+            for role in roles:
+
+                if (
+                    role
+                    and role in member.roles
+                ):
+
+                    await member.remove_roles(
+                        role,
+                        reason="Kicked from clan"
+                    )
+
+        except Exception as error:
+
+            await interaction.response.send_message(
+                f"❌ Could not remove roles: `{error}`",
+                ephemeral=True
+            )
+
+            return
+
+        clan["members"] = [
+            int(x)
+            for x in clan.get(
+                "members",
+                []
+            )
+            if int(x) != member.id
+        ]
+
+        clan["leaders"] = [
+            int(x)
+            for x in clan.get(
+                "leaders",
+                []
+            )
+            if int(x) != member.id
+        ]
+
+        await save_data()
+
+        await interaction.response.send_message(
+            f"👢 {member.mention} was removed from the clan.",
+            ephemeral=True
+        )
+
+    @ui.button(
+        label="Clan Member",
+        style=discord.ButtonStyle.success,
+        emoji="👤"
+    )
+    async def make_member(
+        self,
+        interaction,
+        button
+    ):
+
+        clan = self.get_clan(
+            interaction
+        )
+
+        if not clan or not is_clan_leader(
+            interaction.user,
+            clan
+        ):
+
+            await interaction.response.send_message(
+                "❌ Only leaders can change clan roles.",
+                ephemeral=True
+            )
+
+            return
+
+        member = interaction.guild.get_member(
+            self.member_id
+        )
+
+        if not member:
+            return
+
+        member_role = get_role(
             interaction.guild,
             clan.get(
                 "member_role_id"
             )
         )
 
-        moderator_role = self.get_role(
+        moderator_role = get_role(
             interaction.guild,
             clan.get(
-                "moderator_role_id"
+                "clan_moderator_role_id"
+            )
+        )
+
+        leader_role = get_role(
+            interaction.guild,
+            clan.get(
+                "leader_role_id"
             )
         )
 
         try:
 
-            if member_role:
-
+            if leader_role:
                 await member.remove_roles(
-                    member_role,
-                    reason="Clan role update"
+                    leader_role
                 )
 
             if moderator_role:
-
                 await member.remove_roles(
-                    moderator_role,
-                    reason="Clan role update"
+                    moderator_role
                 )
 
-            if role_type == "moderator":
+            if member_role:
+                await member.add_roles(
+                    member_role
+                )
 
-                if moderator_role:
+        except Exception as error:
 
-                    await member.add_roles(
-                        moderator_role,
-                        reason="Promoted to clan moderator"
-                    )
+            await interaction.response.send_message(
+                f"❌ Role update failed: `{error}`",
+                ephemeral=True
+            )
+
+            return
+
+        clan["leaders"] = [
+            int(x)
+            for x in clan.get(
+                "leaders",
+                []
+            )
+            if int(x) != member.id
+        ]
+
+        if member.id not in [
+            int(x)
+            for x in clan.get(
+                "members",
+                []
+            )
+        ]:
+
+            clan.setdefault(
+                "members",
+                []
+            ).append(
+                member.id
+            )
+
+        await save_data()
+
+        await interaction.response.send_message(
+            f"👤 {member.mention} is now a Clan Member.",
+            ephemeral=True
+        )
+
+    @ui.button(
+        label="Clan Moderator",
+        style=discord.ButtonStyle.primary,
+        emoji="🛡️"
+    )
+    async def make_moderator(
+        self,
+        interaction,
+        button
+    ):
+
+        clan = self.get_clan(
+            interaction
+        )
+
+        if not clan or not is_clan_leader(
+            interaction.user,
+            clan
+        ):
+
+            await interaction.response.send_message(
+                "❌ Only leaders can change clan roles.",
+                ephemeral=True
+            )
+
+            return
+
+        member = interaction.guild.get_member(
+            self.member_id
+        )
+
+        if not member:
+            return
+
+        member_role = get_role(
+            interaction.guild,
+            clan.get(
+                "member_role_id"
+            )
+        )
+
+        moderator_role = get_role(
+            interaction.guild,
+            clan.get(
+                "clan_moderator_role_id"
+            )
+        )
+
+        leader_role = get_role(
+            interaction.guild,
+            clan.get(
+                "leader_role_id"
+            )
+        )
+
+        try:
+
+            if leader_role:
+                await member.remove_roles(
+                    leader_role
+                )
+
+            if member_role:
+                await member.add_roles(
+                    member_role
+                )
+
+            if moderator_role:
+                await member.add_roles(
+                    moderator_role
+                )
+
+        except Exception as error:
+
+            await interaction.response.send_message(
+                f"❌ Role update failed: `{error}`",
+                ephemeral=True
+            )
+
+            return
+
+        if member.id not in [
+            int(x)
+            for x in clan.get(
+                "members",
+                []
+            )
+        ]:
+
+            clan.setdefault(
+                "members",
+                []
+            ).append(
+                member.id
+            )
+
+        clan["leaders"] = [
+            int(x)
+            for x in clan.get(
+                "leaders",
+                []
+            )
+            if int(x) != member.id
+        ]
+
+        await save_data()
+
+        await interaction.response.send_message(
+            f"🛡️ {member.mention} is now a Clan Moderator.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# LEADER MANAGEMENT VIEW
+# ============================================================
+
+class LeaderManagementView(
+    ui.View
+):
+
+    def __init__(
+        self,
+        clan_id
+    ):
+
+        super().__init__(
+            timeout=None
+        )
+
+        self.clan_id = str(
+            clan_id
+        )
+
+    @ui.button(
+        label="Refresh",
+        style=discord.ButtonStyle.secondary,
+        emoji="🔄",
+        custom_id="clan_management_refresh"
+    )
+    async def refresh(
+        self,
+        interaction,
+        button
+    ):
+
+        clan = find_clan(
+            interaction.guild,
+            self.clan_id
+        )
+
+        if not clan or not is_clan_leader(
+            interaction.user,
+            clan
+        ):
+
+            await interaction.response.send_message(
+                "❌ You cannot manage this clan.",
+                ephemeral=True
+            )
+
+            return
+
+        embed = await build_leader_embed(
+            interaction.guild,
+            clan
+        )
+
+        await interaction.message.edit(
+            embed=embed,
+            view=LeaderManagementView(
+                self.clan_id
+            )
+        )
+
+        await interaction.response.send_message(
+            "🔄 Member list refreshed.",
+            ephemeral=True
+        )
+
+    @ui.button(
+        label="Manage Member",
+        style=discord.ButtonStyle.primary,
+        emoji="👥",
+        custom_id="clan_management_member"
+    )
+    async def manage(
+        self,
+        interaction,
+        button
+    ):
+
+        clan = find_clan(
+            interaction.guild,
+            self.clan_id
+        )
+
+        if not clan or not can_manage_members(
+            interaction.user,
+            clan
+        ):
+
+            await interaction.response.send_message(
+                "❌ You cannot manage members.",
+                ephemeral=True
+            )
+
+            return
+
+        members = []
+
+        for member_id in clan.get(
+            "members",
+            []
+        ):
+
+            member = interaction.guild.get_member(
+                int(member_id)
+            )
+
+            if member:
+                members.append(
+                    member
+                )
+
+        view = ui.View(
+            timeout=180
+        )
+
+        view.add_item(
+            ClanMemberSelect(
+                self.clan_id,
+                members
+            )
+        )
+
+        await interaction.response.send_message(
+            "Select a clan member:",
+            view=view,
+            ephemeral=True
+        )
+
+    @ui.button(
+        label="Invite Member",
+        style=discord.ButtonStyle.success,
+        emoji="📨",
+        custom_id="clan_management_invite"
+    )
+    async def invite(
+        self,
+        interaction,
+        button
+    ):
+
+        clan = find_clan(
+            interaction.guild,
+            self.clan_id
+        )
+
+        if not clan or not is_clan_leader(
+            interaction.user,
+            clan
+        ):
+
+            await interaction.response.send_message(
+                "❌ Only clan leaders can invite.",
+                ephemeral=True
+            )
+
+            return
+
+        await interaction.response.send_message(
+            "📨 Create a clan invitation:",
+            view=ClanInviteCreateView(
+                self.clan_id
+            ),
+            ephemeral=True
+        )
+
+    @ui.button(
+        label="Create Channel",
+        style=discord.ButtonStyle.success,
+        emoji="➕",
+        custom_id="clan_management_channel"
+    )
+    async def create_channel(
+        self,
+        interaction,
+        button
+    ):
+
+        clan = find_clan(
+            interaction.guild,
+            self.clan_id
+        )
+
+        if not clan or not is_clan_leader(
+            interaction.user,
+            clan
+        ):
+
+            await interaction.response.send_message(
+                "❌ Only clan leaders can create channels.",
+                ephemeral=True
+            )
+
+            return
+
+        await interaction.response.send_modal(
+            ClanChannelModal(
+                self.clan_id
+            )
+        )
+
+
+# ============================================================
+# INVITE CREATION
+# ============================================================
+
+class ClanInviteCreateView(
+    ui.View
+):
+
+    def __init__(
+        self,
+        clan_id
+    ):
+
+        super().__init__(
+            timeout=180
+        )
+
+        self.clan_id = str(
+            clan_id
+        )
+
+    @ui.button(
+        label="Create Invite",
+        style=discord.ButtonStyle.success,
+        emoji="📨"
+    )
+    async def create(
+        self,
+        interaction,
+        button
+    ):
+
+        clan = find_clan(
+            interaction.guild,
+            self.clan_id
+        )
+
+        if not clan or not is_clan_leader(
+            interaction.user,
+            clan
+        ):
+
+            await interaction.response.send_message(
+                "❌ You cannot invite members.",
+                ephemeral=True
+            )
+
+            return
+
+        channel = get_channel(
+            interaction.guild,
+            clan.get(
+                "member_text_id"
+            )
+        )
+
+        if not channel:
+
+            await interaction.response.send_message(
+                "❌ Clan chat channel not found.",
+                ephemeral=True
+            )
+
+            return
+
+        try:
+
+            invite = await channel.create_invite(
+                max_age=86400,
+                max_uses=1,
+                unique=True,
+                reason="Clan invitation"
+            )
+
+        except Exception as error:
+
+            await interaction.response.send_message(
+                f"❌ Could not create invite: `{error}`",
+                ephemeral=True
+            )
+
+            return
+
+        await interaction.response.send_message(
+            (
+                f"📨 **{clan['clan_name']} invitation**\n\n"
+                f"Send this to the member:\n"
+                f"{invite.url}\n\n"
+                "After joining the server, "
+                "the member can use the **Join Clan** button."
+            ),
+            ephemeral=True
+        )
+
+
+# ============================================================
+# INVITATION JOIN VIEW
+# ============================================================
+
+class ClanJoinView(
+    ui.View
+):
+
+    def __init__(
+        self,
+        clan_id
+    ):
+
+        super().__init__(
+            timeout=None
+        )
+
+        self.clan_id = str(
+            clan_id
+        )
+
+    @ui.button(
+        label="Join Clan",
+        style=discord.ButtonStyle.success,
+        emoji="✅",
+        custom_id="clan_join_button"
+    )
+    async def join(
+        self,
+        interaction,
+        button
+    ):
+
+        clan = find_clan(
+            interaction.guild,
+            self.clan_id
+        )
+
+        if not clan:
+
+            await interaction.response.send_message(
+                "❌ Clan no longer exists.",
+                ephemeral=True
+            )
+
+            return
+
+        banned = [
+            int(x)
+            for x in clan.get(
+                "banned_members",
+                []
+            )
+        ]
+
+        if interaction.user.id in banned:
+
+            await interaction.response.send_message(
+                "❌ You are banned from this clan.",
+                ephemeral=True
+            )
+
+            return
+
+        member_role = get_role(
+            interaction.guild,
+            clan.get(
+                "member_role_id"
+            )
+        )
+
+        if not member_role:
+
+            await interaction.response.send_message(
+                "❌ Clan member role no longer exists.",
+                ephemeral=True
+            )
+
+            return
+
+        try:
+
+            await interaction.user.add_roles(
+                member_role,
+                reason="Accepted clan invitation"
+            )
+
+        except Exception as error:
+
+            await interaction.response.send_message(
+                f"❌ Could not give clan role: `{error}`",
+                ephemeral=True
+            )
+
+            return
+
+        members = [
+            int(x)
+            for x in clan.get(
+                "members",
+                []
+            )
+        ]
+
+        if interaction.user.id not in members:
+
+            members.append(
+                interaction.user.id
+            )
+
+        clan["members"] = members
+
+        await save_data()
+
+        await interaction.response.send_message(
+            (
+                f"✅ You joined "
+                f"**{clan['clan_name']}**!"
+            ),
+            ephemeral=True
+        )
+
+
+# ============================================================
+# CHANNEL CREATION
+# ============================================================
+
+class ClanChannelModal(
+    ui.Modal,
+    title="Create Clan Channel"
+):
+
+    channel_name = ui.TextInput(
+        label="Channel Name",
+        placeholder="team-room",
+        max_length=90,
+        required=True
+    )
+
+    channel_type = ui.TextInput(
+        label="Channel Type",
+        placeholder="text or voice",
+        max_length=10,
+        required=True
+    )
+
+    def __init__(
+        self,
+        clan_id
+    ):
+
+        super().__init__()
+
+        self.clan_id = str(
+            clan_id
+        )
+
+    async def on_submit(
+        self,
+        interaction
+    ):
+
+        clan = find_clan(
+            interaction.guild,
+            self.clan_id
+        )
+
+        if not clan or not is_clan_leader(
+            interaction.user,
+            clan
+        ):
+
+            await interaction.response.send_message(
+                "❌ Only clan leaders can create channels.",
+                ephemeral=True
+            )
+
+            return
+
+        category = get_channel(
+            interaction.guild,
+            clan.get(
+                "category_id"
+            )
+        )
+
+        if not isinstance(
+            category,
+            discord.CategoryChannel
+        ):
+
+            await interaction.response.send_message(
+                "❌ Clan category not found.",
+                ephemeral=True
+            )
+
+            return
+
+        name = (
+            self.channel_name.value
+            .strip()
+            .lower()
+            .replace(" ", "-")
+        )
+
+        channel_type = (
+            self.channel_type.value
+            .strip()
+            .lower()
+        )
+
+        try:
+
+            if channel_type in (
+                "voice",
+                "vc"
+            ):
+
+                channel = await interaction.guild.create_voice_channel(
+                    name=name,
+                    category=category,
+                    reason="Clan leader created voice channel"
+                )
+
+            elif channel_type in (
+                "text",
+                "chat"
+            ):
+
+                channel = await interaction.guild.create_text_channel(
+                    name=name,
+                    category=category,
+                    reason="Clan leader created text channel"
+                )
 
             else:
 
-                if member_role:
-
-                    await member.add_roles(
-                        member_role,
-                        reason="Set as clan member"
-                    )
-
-            clan[
-                "members"
-            ][
-                str(member.id)
-            ] = role_type
-
-            self.save_data()
-
-            await interaction.response.send_message(
-                f"✅ {member.mention} is now "
-                f"**Clan {role_type.title()}**.",
-                ephemeral=True
-            )
-
-        except Exception as e:
-
-            await interaction.response.send_message(
-                f"❌ Could not update role:\n`{e}`",
-                ephemeral=True
-            )
-
-
-    # ========================================================
-    # WARN MODAL
-    # ========================================================
-
-    class WarnModal(
-        discord.ui.Modal,
-        title="Warn Clan Member"
-    ):
-
-        def __init__(
-            self,
-            cog,
-            clan_id,
-            member_id
-        ):
-
-            super().__init__()
-
-            self.cog = cog
-
-            self.clan_id = str(
-                clan_id
-            )
-
-            self.member_id = int(
-                member_id
-            )
-
-            self.reason = discord.ui.TextInput(
-                label="Warning Reason",
-                placeholder="Enter the reason for the warning",
-                required=True,
-                style=discord.TextStyle.paragraph,
-                max_length=500
-            )
-
-            self.add_item(
-                self.reason
-            )
-
-
-        async def on_submit(
-            self,
-            interaction
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
                 await interaction.response.send_message(
-                    "❌ Clan not found.",
+                    "❌ Type must be `text` or `voice`.",
                     ephemeral=True
                 )
 
                 return
 
-            if not self.cog.is_clan_leader(
-                interaction,
-                clan
-            ):
+            everyone = interaction.guild.default_role
 
-                await interaction.response.send_message(
-                    "❌ Only the clan leader can warn members.",
-                    ephemeral=True
-                )
-
-                return
-
-            warnings = clan.setdefault(
-                "warnings",
-                {}
-            )
-
-            user_warnings = warnings.setdefault(
-                str(self.member_id),
-                []
-            )
-
-            user_warnings.append(
-                {
-                    "reason": str(
-                        self.reason.value
-                    ),
-                    "moderator_id": interaction.user.id
-                }
-            )
-
-            self.cog.save_data()
-
-            member = interaction.guild.get_member(
-                self.member_id
-            )
-
-            await interaction.response.send_message(
-                f"⚠️ {member.mention if member else 'Member'} "
-                f"has received a clan warning.\n\n"
-                f"**Reason:** {self.reason.value}\n"
-                f"**Total warnings:** "
-                f"`{len(user_warnings)}`",
-                ephemeral=True
-            )
-
-
-    # ========================================================
-    # KICK CONFIRM VIEW
-    # ========================================================
-
-    class KickConfirmView(
-        discord.ui.View
-    ):
-
-        def __init__(
-            self,
-            cog,
-            clan_id,
-            member_id
-        ):
-
-            super().__init__(
-                timeout=60
-            )
-
-            self.cog = cog
-
-            self.clan_id = str(
-                clan_id
-            )
-
-            self.member_id = int(
-                member_id
-            )
-
-
-        @discord.ui.button(
-            label="Confirm Kick",
-            emoji="👢",
-            style=discord.ButtonStyle.danger
-        )
-        async def confirm(
-            self,
-            interaction,
-            button
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            if not self.cog.is_clan_leader(
-                interaction,
-                clan
-            ):
-
-                await interaction.response.send_message(
-                    "❌ Only the clan leader can kick members.",
-                    ephemeral=True
-                )
-
-                return
-
-            if self.member_id == int(
-                clan["owner_id"]
-            ):
-
-                await interaction.response.send_message(
-                    "❌ You cannot kick the clan owner.",
-                    ephemeral=True
-                )
-
-                return
-
-            member = interaction.guild.get_member(
-                self.member_id
-            )
-
-            member_role = self.cog.get_role(
+            member_role = get_role(
                 interaction.guild,
                 clan.get(
                     "member_role_id"
                 )
             )
 
-            moderator_role = self.cog.get_role(
+            moderator_role = get_role(
                 interaction.guild,
                 clan.get(
-                    "moderator_role_id"
+                    "clan_moderator_role_id"
                 )
             )
 
-            try:
-
-                if member:
-
-                    if member_role:
-
-                        await member.remove_roles(
-                            member_role,
-                            reason="Removed from clan"
-                        )
-
-                    if moderator_role:
-
-                        await member.remove_roles(
-                            moderator_role,
-                            reason="Removed from clan"
-                        )
-
-                clan.get(
-                    "members",
-                    {}
-                ).pop(
-                    str(self.member_id),
-                    None
-                )
-
-                clan.get(
-                    "warnings",
-                    {}
-                ).pop(
-                    str(self.member_id),
-                    None
-                )
-
-                self.cog.save_data()
-
-                await interaction.response.send_message(
-                    f"👢 {member.mention if member else 'Member'} "
-                    f"has been removed from the clan.",
-                    ephemeral=True
-                )
-
-                text_channel = interaction.guild.get_channel(
-                    int(clan["text_channel_id"])
-                )
-
-                if text_channel and member:
-
-                    await text_channel.send(
-                        f"👢 {member.mention} "
-                        f"has been removed from the clan."
-                    )
-
-                leader_channel = interaction.guild.get_channel(
-                    int(clan["leader_channel_id"])
-                )
-
-                if leader_channel:
-
-                    await self.cog.update_leader_panel(
-                        leader_channel,
-                        clan
-                    )
-
-            except Exception as e:
-
-                await interaction.response.send_message(
-                    f"❌ Could not remove member:\n`{e}`",
-                    ephemeral=True
-                )
-
-
-        @discord.ui.button(
-            label="Cancel",
-            emoji="❌",
-            style=discord.ButtonStyle.secondary
-        )
-        async def cancel(
-            self,
-            interaction,
-            button
-        ):
-
-            await interaction.response.send_message(
-                "❌ Kick cancelled.",
-                ephemeral=True
-            )
-
-
-    # ========================================================
-    # CREATE CHANNEL MODAL
-    # ========================================================
-
-    class CreateChannelModal(
-        discord.ui.Modal
-    ):
-
-        def __init__(
-            self,
-            cog,
-            clan_id,
-            channel_type
-        ):
-
-            super().__init__(
-                title=(
-                    "Create Voice Channel"
-                    if channel_type == "voice"
-                    else "Create Text Channel"
-                )
-            )
-
-            self.cog = cog
-
-            self.clan_id = str(
-                clan_id
-            )
-
-            self.channel_type = channel_type
-
-            self.channel_name = discord.ui.TextInput(
-                label="Channel Name",
-                placeholder="Example: gaming-room",
-                required=True,
-                max_length=50
-            )
-
-            self.add_item(
-                self.channel_name
-            )
-
-
-        async def on_submit(
-            self,
-            interaction
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            if not self.cog.is_clan_leader(
-                interaction,
-                clan
-            ):
-
-                await interaction.response.send_message(
-                    "❌ Only the clan leader can create clan channels.",
-                    ephemeral=True
-                )
-
-                return
-
-            category = interaction.guild.get_channel(
-                int(
-                    self.cog.config.get(
-                        "clan_category_id"
-                    )
-                )
-            )
-
-            if not isinstance(
-                category,
-                discord.CategoryChannel
-            ):
-
-                await interaction.response.send_message(
-                    "❌ Clan category could not be found.",
-                    ephemeral=True
-                )
-
-                return
-
-            name = clean_channel_name(
-                self.channel_name.value
-            )
-
-            # ------------------------------------------------
-            # Permissions
-            # ------------------------------------------------
-
-            leader_role = self.cog.get_role(
+            leader_role = get_role(
                 interaction.guild,
                 clan.get(
                     "leader_role_id"
                 )
             )
 
-            moderator_role = self.cog.get_role(
-                interaction.guild,
-                clan.get(
-                    "moderator_role_id"
-                )
+            await channel.set_permissions(
+                everyone,
+                view_channel=False
             )
 
-            member_role = self.cog.get_role(
-                interaction.guild,
-                clan.get(
-                    "member_role_id"
-                )
-            )
+            if member_role:
 
-            overwrites = {
+                if isinstance(
+                    channel,
+                    discord.TextChannel
+                ):
 
-                interaction.guild.default_role:
-                    discord.PermissionOverwrite(
-                        view_channel=False
+                    await channel.set_permissions(
+                        member_role,
+                        view_channel=True,
+                        send_messages=True,
+                        read_message_history=True
                     )
-            }
+
+                else:
+
+                    await channel.set_permissions(
+                        member_role,
+                        view_channel=True,
+                        connect=True,
+                        speak=True
+                    )
+
+            if moderator_role:
+
+                if isinstance(
+                    channel,
+                    discord.TextChannel
+                ):
+
+                    await channel.set_permissions(
+                        moderator_role,
+                        view_channel=True,
+                        send_messages=True,
+                        read_message_history=True,
+                        manage_messages=True
+                    )
+
+                else:
+
+                    await channel.set_permissions(
+                        moderator_role,
+                        view_channel=True,
+                        connect=True,
+                        speak=True,
+                        move_members=True,
+                        mute_members=True,
+                        deafen_members=True
+                    )
 
             if leader_role:
 
-                overwrites[
-                    leader_role
-                ] = discord.PermissionOverwrite(
+                await channel.set_permissions(
+                    leader_role,
                     view_channel=True,
                     send_messages=True,
                     read_message_history=True,
-                    manage_messages=True,
                     manage_channels=True,
                     manage_permissions=True,
+                    manage_messages=True,
+                    manage_threads=True,
                     connect=True,
                     speak=True,
                     move_members=True,
@@ -3178,1094 +2683,100 @@ class Clans(commands.Cog):
                     deafen_members=True
                 )
 
-            if moderator_role:
+            await interaction.response.send_message(
+                (
+                    f"✅ Created {channel.mention}\n"
+                    "You have full management permissions."
+                ),
+                ephemeral=True
+            )
 
-                overwrites[
-                    moderator_role
-                ] = discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True,
-                    manage_messages=True,
-                    connect=True,
-                    speak=True
-                )
+        except Exception as error:
 
-            if member_role:
-
-                overwrites[
-                    member_role
-                ] = discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True,
-                    connect=True,
-                    speak=True
-                )
-
-            try:
-
-                if self.channel_type == "voice":
-
-                    new_channel = await interaction.guild.create_voice_channel(
-                        name,
-                        category=category,
-                        overwrites=overwrites,
-                        reason=f"Clan channel: {clan['name']}"
-                    )
-
-                else:
-
-                    new_channel = await interaction.guild.create_text_channel(
-                        name,
-                        category=category,
-                        overwrites=overwrites,
-                        reason=f"Clan channel: {clan['name']}"
-                    )
-
-                clan.setdefault(
-                    "custom_channels",
-                    []
-                ).append(
-                    new_channel.id
-                )
-
-                self.cog.save_data()
-
-                await interaction.response.send_message(
-                    f"✅ Created {new_channel.mention}",
-                    ephemeral=True
-                )
-
-            except Exception as e:
-
-                await interaction.response.send_message(
-                    f"❌ Could not create channel:\n`{e}`",
-                    ephemeral=True
-                )
+            await interaction.response.send_message(
+                f"❌ Channel creation failed:\n`{error}`",
+                ephemeral=True
+            )
 
 
-    # ========================================================
-    # LEADER PANEL
-    # ========================================================
+# ============================================================
+# SEND LEADER PANEL
+# ============================================================
 
-    class LeaderPanelView(
-        discord.ui.View
+async def send_leader_panel(
+    guild,
+    clan,
+    channel
+):
+
+    embed = await build_leader_embed(
+        guild,
+        clan
+    )
+
+    await channel.send(
+        embed=embed,
+        view=LeaderManagementView(
+            clan["clan_id"]
+        )
+    )
+
+
+# ============================================================
+# MODERATOR CLAN SELECT
+# ============================================================
+
+class ClanAdminSelect(
+    ui.Select
+):
+
+    def __init__(
+        self,
+        clans
     ):
 
-        def __init__(
-            self,
-            cog,
-            clan_id
-        ):
+        options = []
 
-            super().__init__(
-                timeout=None
+        for clan_id, clan in list(
+            clans.items()
+        )[:25]:
+
+            options.append(
+                discord.SelectOption(
+                    label=str(
+                        clan.get(
+                            "clan_name",
+                            clan_id
+                        )
+                    )[:100],
+                    value=str(
+                        clan_id
+                    )
+                )
             )
 
-            self.cog = cog
+        if not options:
 
-            self.clan_id = str(
-                clan_id
+            options.append(
+                discord.SelectOption(
+                    label="No clans",
+                    value="0"
+                )
             )
 
-
-        # ----------------------------------------------------
-        # Refresh
-        # ----------------------------------------------------
-
-        @discord.ui.button(
-            label="Refresh",
-            emoji="🔄",
-            style=discord.ButtonStyle.primary
+        super().__init__(
+            placeholder="Select a clan",
+            options=options
         )
-        async def refresh(
-            self,
-            interaction,
-            button
-        ):
 
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            if not self.cog.is_clan_leader(
-                interaction,
-                clan
-            ):
-
-                await interaction.response.send_message(
-                    "❌ Only the clan leader can use this panel.",
-                    ephemeral=True
-                )
-
-                return
-
-            await interaction.response.send_message(
-                embed=self.cog.build_leader_embed(
-                    interaction.guild,
-                    clan
-                ),
-                view=self.cog.LeaderPanelView(
-                    self.cog,
-                    self.clan_id
-                ),
-                ephemeral=True
-            )
-
-
-        # ----------------------------------------------------
-        # Invite
-        # ----------------------------------------------------
-
-        @discord.ui.button(
-            label="Invite Member",
-            emoji="➕",
-            style=discord.ButtonStyle.success
-        )
-        async def invite(
-            self,
-            interaction,
-            button
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            if not self.cog.can_manage_clan(
-                interaction,
-                clan
-            ):
-
-                await interaction.response.send_message(
-                    "❌ You cannot invite members.",
-                    ephemeral=True
-                )
-
-                return
-
-            await interaction.response.send_message(
-                "Select the Discord member you want to invite:",
-                view=self.cog.InviteSelectView(
-                    self.cog,
-                    self.clan_id
-                ),
-                ephemeral=True
-            )
-
-
-        # ----------------------------------------------------
-        # Manage Members
-        # ----------------------------------------------------
-
-        @discord.ui.button(
-            label="Manage Members",
-            emoji="👥",
-            style=discord.ButtonStyle.secondary
-        )
-        async def manage(
-            self,
-            interaction,
-            button
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            if not self.cog.is_clan_leader(
-                interaction,
-                clan
-            ):
-
-                await interaction.response.send_message(
-                    "❌ Only the clan leader can manage members.",
-                    ephemeral=True
-                )
-
-                return
-
-            await interaction.response.send_message(
-                "Select a clan member:",
-                view=self.cog.ClanMemberSelectView(
-                    self.cog,
-                    self.clan_id,
-                    "manage"
-                ),
-                ephemeral=True
-            )
-
-
-        # ----------------------------------------------------
-        # Warn
-        # ----------------------------------------------------
-
-        @discord.ui.button(
-            label="Warn",
-            emoji="⚠️",
-            style=discord.ButtonStyle.danger
-        )
-        async def warn(
-            self,
-            interaction,
-            button
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            if not self.cog.is_clan_leader(
-                interaction,
-                clan
-            ):
-
-                await interaction.response.send_message(
-                    "❌ Only the clan leader can warn members.",
-                    ephemeral=True
-                )
-
-                return
-
-            await interaction.response.send_message(
-                "Select the member you want to warn:",
-                view=self.cog.ClanMemberSelectView(
-                    self.cog,
-                    self.clan_id,
-                    "warn"
-                ),
-                ephemeral=True
-            )
-
-
-        # ----------------------------------------------------
-        # Kick
-        # ----------------------------------------------------
-
-        @discord.ui.button(
-            label="Kick",
-            emoji="👢",
-            style=discord.ButtonStyle.danger
-        )
-        async def kick(
-            self,
-            interaction,
-            button
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            if not self.cog.is_clan_leader(
-                interaction,
-                clan
-            ):
-
-                await interaction.response.send_message(
-                    "❌ Only the clan leader can kick members.",
-                    ephemeral=True
-                )
-
-                return
-
-            await interaction.response.send_message(
-                "Select the member you want to kick:",
-                view=self.cog.ClanMemberSelectView(
-                    self.cog,
-                    self.clan_id,
-                    "kick"
-                ),
-                ephemeral=True
-            )
-
-
-        # ----------------------------------------------------
-        # Create Text Channel
-        # ----------------------------------------------------
-
-        @discord.ui.button(
-            label="Create Text",
-            emoji="💬",
-            style=discord.ButtonStyle.primary,
-            row=1
-        )
-        async def create_text(
-            self,
-            interaction,
-            button
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            if not self.cog.is_clan_leader(
-                interaction,
-                clan
-            ):
-
-                await interaction.response.send_message(
-                    "❌ Only the clan leader can create channels.",
-                    ephemeral=True
-                )
-
-                return
-
-            await interaction.response.send_modal(
-                self.cog.CreateChannelModal(
-                    self.cog,
-                    self.clan_id,
-                    "text"
-                )
-            )
-
-
-        # ----------------------------------------------------
-        # Create Voice Channel
-        # ----------------------------------------------------
-
-        @discord.ui.button(
-            label="Create Voice",
-            emoji="🔊",
-            style=discord.ButtonStyle.success,
-            row=1
-        )
-        async def create_voice(
-            self,
-            interaction,
-            button
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            if not self.cog.is_clan_leader(
-                interaction,
-                clan
-            ):
-
-                await interaction.response.send_message(
-                    "❌ Only the clan leader can create channels.",
-                    ephemeral=True
-                )
-
-                return
-
-            await interaction.response.send_modal(
-                self.cog.CreateChannelModal(
-                    self.cog,
-                    self.clan_id,
-                    "voice"
-                )
-            )
-
-
-    # ========================================================
-    # /CLANS
-    # MODERATOR MANAGEMENT
-    # ========================================================
-
-    @app_commands.command(
-        name="clans",
-        description="Open clan management."
-    )
-    async def clans(
+    async def callback(
         self,
         interaction
     ):
 
-        if not await self.moderator_check(
-            interaction
-        ):
-            return
-
-        clans = []
-
-        for clan_id, clan in self.data[
-            "clans"
-        ].items():
-
-            if str(
-                clan.get("guild_id")
-            ) != str(
-                interaction.guild.id
-            ):
-                continue
-
-            clans.append(
-                (
-                    clan_id,
-                    clan
-                )
-            )
-
-        if not clans:
-
-            await interaction.response.send_message(
-                "🏰 No clans are currently registered.",
-                ephemeral=True
-            )
-
-            return
-
-        embed = discord.Embed(
-            title="🏰 Clan Management",
-            description=(
-                "Select a clan below to manage it."
-            ),
-            color=discord.Color.blurple()
-        )
-
-        for clan_id, clan in clans:
-
-            owner = interaction.guild.get_member(
-                int(clan["owner_id"])
-            )
-
-            text_channel = interaction.guild.get_channel(
-                int(clan["text_channel_id"])
-            )
-
-            leader_channel = interaction.guild.get_channel(
-                int(clan["leader_channel_id"])
-            )
-
-            value = (
-                f"👑 Owner: "
-                f"{owner.mention if owner else 'Unknown'}\n"
-                f"👥 Members: "
-                f"`{len(clan.get('members', {}))}`\n"
-                f"💬 Chat: "
-                f"{text_channel.mention if text_channel else 'Missing'}\n"
-                f"👑 Leader Panel: "
-                f"{leader_channel.mention if leader_channel else 'Missing'}\n"
-                f"🆔 ID: `{clan_id}`"
-            )
-
-            embed.add_field(
-                name=f"🏰 {clan['name']}",
-                value=value,
-                inline=False
-            )
-
-        await interaction.response.send_message(
-            embed=embed,
-            view=self.ClanModeratorView(
-                self
-            ),
-            ephemeral=True
-        )
-
-
-    # ========================================================
-    # MODERATOR CLAN SELECT
-    # ========================================================
-
-    class ClanSelect(
-        discord.ui.Select
-    ):
-
-        def __init__(
-            self,
-            cog
-        ):
-
-            self.cog = cog
-
-            options = []
-
-            for clan_id, clan in cog.data[
-                "clans"
-            ].items():
-
-                options.append(
-                    discord.SelectOption(
-                        label=clan["name"][:100],
-                        description=(
-                            f"Clan ID: {clan_id}"
-                        ),
-                        value=str(
-                            clan_id
-                        )
-                    )
-                )
-
-                if len(options) >= 25:
-                    break
-
-            super().__init__(
-                placeholder="Select a clan to manage",
-                min_values=1,
-                max_values=1,
-                options=options,
-                custom_id="clan_moderator_select"
-            )
-
-
-        async def callback(
-            self,
-            interaction
-        ):
-
-            if not await self.cog.moderator_check(
-                interaction
-            ):
-                return
-
-            clan = self.cog.get_clan(
-                self.values[0]
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            await interaction.response.send_message(
-                embed=self.cog.build_moderator_embed(
-                    interaction.guild,
-                    clan
-                ),
-                view=self.cog.SelectedClanModeratorView(
-                    self.cog,
-                    clan["id"]
-                ),
-                ephemeral=True
-            )
-
-
-    # ========================================================
-    # MODERATOR VIEW
-    # ========================================================
-
-    class ClanModeratorView(
-        discord.ui.View
-    ):
-
-        def __init__(
-            self,
-            cog
-        ):
-
-            super().__init__(
-                timeout=180
-            )
-
-            if cog.data[
-                "clans"
-            ]:
-
-                self.add_item(
-                    cog.ClanSelect(
-                        cog
-                    )
-                )
-
-
-    # ========================================================
-    # MODERATOR EMBED
-    # ========================================================
-
-    def build_moderator_embed(
-        self,
-        guild,
-        clan
-    ):
-
-        owner = guild.get_member(
-            int(clan["owner_id"])
-        )
-
-        members = clan.get(
-            "members",
-            {}
-        )
-
-        moderator_count = sum(
-            1
-            for role in members.values()
-            if role == "moderator"
-        )
-
-        embed = discord.Embed(
-            title=f"🏰 {clan['name']}",
-            color=discord.Color.blurple()
-        )
-
-        embed.add_field(
-            name="👑 Owner",
-            value=(
-                owner.mention
-                if owner
-                else "Unknown"
-            ),
-            inline=True
-        )
-
-        embed.add_field(
-            name="👥 Members",
-            value=str(
-                len(members)
-            ),
-            inline=True
-        )
-
-        embed.add_field(
-            name="🛡️ Clan Moderators",
-            value=str(
-                moderator_count
-            ),
-            inline=True
-        )
-
-        embed.add_field(
-            name="🎮 Game",
-            value=clan.get(
-                "category",
-                "Unknown"
-            ),
-            inline=True
-        )
-
-        embed.add_field(
-            name="🆔 Clan ID",
-            value=f"`{clan['id']}`",
-            inline=True
-        )
-
-        return embed
-
-
-    # ========================================================
-    # SELECTED MODERATOR VIEW
-    # ========================================================
-
-    class SelectedClanModeratorView(
-        discord.ui.View
-    ):
-
-        def __init__(
-            self,
-            cog,
-            clan_id
-        ):
-
-            super().__init__(
-                timeout=180
-            )
-
-            self.cog = cog
-
-            self.clan_id = str(
-                clan_id
-            )
-
-
-        @discord.ui.button(
-            label="Delete Clan",
-            emoji="🗑️",
-            style=discord.ButtonStyle.danger
-        )
-        async def delete(
-            self,
-            interaction,
-            button
-        ):
-
-            if not await self.cog.moderator_check(
-                interaction
-            ):
-                return
-
-            await interaction.response.send_message(
-                "⚠️ Are you sure you want to delete this clan?",
-                view=self.cog.DeleteClanConfirmView(
-                    self.cog,
-                    self.clan_id
-                ),
-                ephemeral=True
-            )
-
-
-        @discord.ui.button(
-            label="Warn Member",
-            emoji="⚠️",
-            style=discord.ButtonStyle.danger
-        )
-        async def warn(
-            self,
-            interaction,
-            button
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-                return
-
-            await interaction.response.send_message(
-                "Select a member to warn:",
-                view=self.cog.ClanMemberSelectView(
-                    self.cog,
-                    self.clan_id,
-                    "warn"
-                ),
-                ephemeral=True
-            )
-
-
-        @discord.ui.button(
-            label="Permissions",
-            emoji="⚙️",
-            style=discord.ButtonStyle.secondary
-        )
-        async def permissions(
-            self,
-            interaction,
-            button
-        ):
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan not found.",
-                    ephemeral=True
-                )
-
-                return
-
-            permissions = clan.get(
-                "permissions",
-                {}
-            )
-
-            text = "\n".join(
-                f"**{name.replace('_', ' ').title()}**: "
-                f"{'✅' if value else '❌'}"
-                for name, value in permissions.items()
-            )
-
-            await interaction.response.send_message(
-                f"⚙️ **{clan['name']} Permissions**\n\n"
-                f"{text}",
-                ephemeral=True
-            )
-
-
-    # ========================================================
-    # DELETE CLAN CONFIRM
-    # ========================================================
-
-    class DeleteClanConfirmView(
-        discord.ui.View
-    ):
-
-        def __init__(
-            self,
-            cog,
-            clan_id
-        ):
-
-            super().__init__(
-                timeout=60
-            )
-
-            self.cog = cog
-
-            self.clan_id = str(
-                clan_id
-            )
-
-
-        @discord.ui.button(
-            label="Delete Clan",
-            emoji="🗑️",
-            style=discord.ButtonStyle.danger
-        )
-        async def confirm(
-            self,
-            interaction,
-            button
-        ):
-
-            if not await self.cog.moderator_check(
-                interaction
-            ):
-                return
-
-            clan = self.cog.get_clan(
-                self.clan_id
-            )
-
-            if not clan:
-
-                await interaction.response.send_message(
-                    "❌ Clan no longer exists.",
-                    ephemeral=True
-                )
-
-                return
-
-            guild = interaction.guild
-
-            # ------------------------------------------------
-            # Delete custom channels
-            # ------------------------------------------------
-
-            channel_ids = list(
-                clan.get(
-                    "custom_channels",
-                    []
-                )
-            )
-
-            channel_ids.extend(
-                [
-                    clan.get(
-                        "text_channel_id"
-                    ),
-                    clan.get(
-                        "leader_channel_id"
-                    )
-                ]
-            )
-
-            # Delete unique IDs only
-
-            seen = set()
-
-            for channel_id in channel_ids:
-
-                if not channel_id:
-                    continue
-
-                if channel_id in seen:
-                    continue
-
-                seen.add(
-                    channel_id
-                )
-
-                channel = guild.get_channel(
-                    int(channel_id)
-                )
-
-                if channel:
-
-                    try:
-
-                        await channel.delete(
-                            reason="Clan deleted"
-                        )
-
-                    except Exception as e:
-
-                        print(
-                            f"⚠️ Could not delete channel: {e}"
-                        )
-
-            # ------------------------------------------------
-            # Delete roles
-            # ------------------------------------------------
-
-            role_ids = [
-
-                clan.get(
-                    "leader_role_id"
-                ),
-
-                clan.get(
-                    "moderator_role_id"
-                ),
-
-                clan.get(
-                    "member_role_id"
-                )
-
-            ]
-
-            for role_id in role_ids:
-
-                if not role_id:
-                    continue
-
-                role = guild.get_role(
-                    int(role_id)
-                )
-
-                if role:
-
-                    try:
-
-                        await role.delete(
-                            reason="Clan deleted"
-                        )
-
-                    except Exception as e:
-
-                        print(
-                            f"⚠️ Could not delete role: {e}"
-                        )
-
-            # ------------------------------------------------
-            # Remove invites
-            # ------------------------------------------------
-
-            invites_to_delete = [
-
-                invite_id
-                for invite_id, invite
-                in self.cog.data[
-                    "invites"
-                ].items()
-
-                if str(
-                    invite.get("clan_id")
-                ) == self.clan_id
-            ]
-
-            for invite_id in invites_to_delete:
-
-                del self.cog.data[
-                    "invites"
-                ][invite_id]
-
-            # ------------------------------------------------
-            # Delete clan
-            # ------------------------------------------------
-
-            del self.cog.data[
-                "clans"
-            ][self.clan_id]
-
-            self.cog.save_data()
-
-            await interaction.response.send_message(
-                f"🗑️ Clan `{self.clan_id}` has been deleted.",
-                ephemeral=True
-            )
-
-
-        @discord.ui.button(
-            label="Cancel",
-            emoji="❌",
-            style=discord.ButtonStyle.secondary
-        )
-        async def cancel(
-            self,
-            interaction,
-            button
-        ):
-
-            await interaction.response.send_message(
-                "❌ Clan deletion cancelled.",
-                ephemeral=True
-            )
-
-
-    # ========================================================
-    # OLD COMMAND COMPATIBILITY
-    #
-    # These are moderator/admin commands.
-    # Leaders do NOT need these.
-    # ========================================================
-
-    @app_commands.command(
-        name="deleteclan",
-        description="Delete a clan."
-    )
-    @app_commands.describe(
-        clan_id="Clan ID."
-    )
-    async def deleteclan(
-        self,
-        interaction,
-        clan_id: str
-    ):
-
-        if not await self.moderator_check(
-            interaction
-        ):
-            return
-
-        clan = self.get_clan(
-            clan_id
+        clan = find_clan(
+            interaction.guild,
+            self.values[0]
         )
 
         if not clan:
@@ -4278,164 +2789,837 @@ class Clans(commands.Cog):
             return
 
         await interaction.response.send_message(
-            "⚠️ Confirm clan deletion:",
-            view=self.DeleteClanConfirmView(
-                self,
-                clan_id
+            embed=await build_admin_embed(
+                interaction.guild,
+                clan
+            ),
+            view=ModeratorClanView(
+                clan["clan_id"]
             ),
             ephemeral=True
         )
 
 
-    # ========================================================
-    # REFRESH CLANS
-    # ========================================================
+class ModeratorClanSelectView(
+    ui.View
+):
 
-    @app_commands.command(
-        name="refreshclans",
-        description="Refresh clan information."
-    )
-    async def refreshclans(
+    def __init__(
         self,
-        interaction
+        clans
     ):
 
-        if not await self.moderator_check(
-            interaction
+        super().__init__(
+            timeout=180
+        )
+
+        self.add_item(
+            ClanAdminSelect(
+                clans
+            )
+        )
+
+
+# ============================================================
+# MODERATOR EMBED
+# ============================================================
+
+async def build_admin_embed(
+    guild,
+    clan
+):
+
+    embed = discord.Embed(
+        title=(
+            f"⚔️ {clan['clan_name']}"
+        ),
+        color=discord.Color.blurple()
+    )
+
+    embed.add_field(
+        name="👑 Owner",
+        value=(
+            f"<@{clan['owner_id']}>"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="👥 Members",
+        value=str(
+            len(
+                clan.get(
+                    "members",
+                    []
+                )
+            )
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="📁 Category",
+        value=(
+            f"<#{clan['category_id']}>"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="💬 Clan Chat",
+        value=(
+            f"<#{clan['member_text_id']}>"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="🎙️ Voice",
+        value=(
+            f"<#{clan['general_voice_id']}>"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="📋 Leader Management",
+        value=(
+            f"<#{clan['leader_channel_id']}>"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="👤 Member Role",
+        value=(
+            f"<@&{clan['member_role_id']}>"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="🛡️ Moderator Role",
+        value=(
+            f"<@&{clan['clan_moderator_role_id']}>"
+        ),
+        inline=True
+    )
+
+    embed.add_field(
+        name="👑 Leader Role",
+        value=(
+            f"<@&{clan['leader_role_id']}>"
+        ),
+        inline=True
+    )
+
+    return embed
+
+
+# ============================================================
+# MODERATOR CLAN ACTIONS
+# ============================================================
+
+class ModeratorClanView(
+    ui.View
+):
+
+    def __init__(
+        self,
+        clan_id
+    ):
+
+        super().__init__(
+            timeout=180
+        )
+
+        self.clan_id = str(
+            clan_id
+        )
+
+    @ui.button(
+        label="Delete",
+        style=discord.ButtonStyle.danger,
+        emoji="🗑️"
+    )
+    async def delete(
+        self,
+        interaction,
+        button
+    ):
+
+        if not is_moderator(
+            interaction.user
         ):
+
+            await interaction.response.send_message(
+                "❌ Moderator only.",
+                ephemeral=True
+            )
+
             return
 
         await interaction.response.send_message(
-            "🔄 **Clan system refreshed.**\n\n"
-            f"🏰 Total clans: "
-            f"`{len(self.data['clans'])}`\n"
-            f"📋 Applications: "
-            f"`{len(self.data['applications'])}`\n"
-            f"📨 Pending applications: "
-            f"`{sum(1 for x in self.data['applications'].values() if x.get('status') == 'pending')}`",
+            "⚠️ Delete this clan and its channels/roles?",
+            view=ConfirmDeleteView(
+                self.clan_id
+            ),
+            ephemeral=True
+        )
+
+    @ui.button(
+        label="Warn Owner",
+        style=discord.ButtonStyle.secondary,
+        emoji="⚠️"
+    )
+    async def warn(
+        self,
+        interaction,
+        button
+    ):
+
+        if not is_moderator(
+            interaction.user
+        ):
+
+            await interaction.response.send_message(
+                "❌ Moderator only.",
+                ephemeral=True
+            )
+
+            return
+
+        clan = find_clan(
+            interaction.guild,
+            self.clan_id
+        )
+
+        if not clan:
+            return
+
+        warnings = clan.setdefault(
+            "warnings",
+            {}
+        )
+
+        owner_id = str(
+            clan["owner_id"]
+        )
+
+        warnings[owner_id] = (
+            int(
+                warnings.get(
+                    owner_id,
+                    0
+                )
+            )
+            + 1
+        )
+
+        await save_data()
+
+        await interaction.response.send_message(
+            (
+                "⚠️ Clan owner warned.\n"
+                f"Warnings: **{warnings[owner_id]}**"
+            ),
+            ephemeral=True
+        )
+
+    @ui.button(
+        label="Permissions",
+        style=discord.ButtonStyle.primary,
+        emoji="🔐"
+    )
+    async def permissions(
+        self,
+        interaction,
+        button
+    ):
+
+        if not is_moderator(
+            interaction.user
+        ):
+
+            await interaction.response.send_message(
+                "❌ Moderator only.",
+                ephemeral=True
+            )
+
+            return
+
+        clan = find_clan(
+            interaction.guild,
+            self.clan_id
+        )
+
+        if not clan:
+            return
+
+        category = get_channel(
+            interaction.guild,
+            clan.get(
+                "category_id"
+            )
+        )
+
+        if not isinstance(
+            category,
+            discord.CategoryChannel
+        ):
+
+            await interaction.response.send_message(
+                "❌ Category not found.",
+                ephemeral=True
+            )
+
+            return
+
+        member_role = get_role(
+            interaction.guild,
+            clan.get(
+                "member_role_id"
+            )
+        )
+
+        moderator_role = get_role(
+            interaction.guild,
+            clan.get(
+                "clan_moderator_role_id"
+            )
+        )
+
+        leader_role = get_role(
+            interaction.guild,
+            clan.get(
+                "leader_role_id"
+            )
+        )
+
+        await category.set_permissions(
+            interaction.guild.default_role,
+            view_channel=False
+        )
+
+        if member_role:
+
+            await category.set_permissions(
+                member_role,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                connect=True,
+                speak=True
+            )
+
+        if moderator_role:
+
+            await category.set_permissions(
+                moderator_role,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_messages=True,
+                connect=True,
+                speak=True,
+                move_members=True,
+                mute_members=True,
+                deafen_members=True
+            )
+
+        if leader_role:
+
+            await category.set_permissions(
+                leader_role,
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+                manage_permissions=True,
+                manage_messages=True,
+                manage_threads=True,
+                connect=True,
+                speak=True,
+                move_members=True,
+                mute_members=True,
+                deafen_members=True
+            )
+
+        await interaction.response.send_message(
+            "✅ Clan permissions reset.",
             ephemeral=True
         )
 
 
-    # ========================================================
-    # PERSISTENT VIEWS
-    # ========================================================
+# ============================================================
+# DELETE CLAN
+# ============================================================
 
-    async def restore_views(
-        self
+class ConfirmDeleteView(
+    ui.View
+):
+
+    def __init__(
+        self,
+        clan_id
     ):
 
-        try:
+        super().__init__(
+            timeout=60
+        )
 
-            # ------------------------------------------------
-            # Application form
-            # ------------------------------------------------
+        self.clan_id = str(
+            clan_id
+        )
 
-            self.bot.add_view(
-                self.ApplicationFormView(
-                    self
-                )
+    @ui.button(
+        label="YES DELETE",
+        style=discord.ButtonStyle.danger,
+        emoji="🗑️"
+    )
+    async def confirm(
+        self,
+        interaction,
+        button
+    ):
+
+        if not is_moderator(
+            interaction.user
+        ):
+
+            await interaction.response.send_message(
+                "❌ Moderator only.",
+                ephemeral=True
             )
 
-            # ------------------------------------------------
-            # Pending applications
-            # ------------------------------------------------
+            return
 
-            for application_id, application in self.data[
-                "applications"
-            ].items():
+        clan = find_clan(
+            interaction.guild,
+            self.clan_id
+        )
 
-                if application.get(
-                    "status"
-                ) == "pending":
+        if not clan:
 
-                    self.bot.add_view(
-                        self.ApplicationReviewView(
-                            self,
-                            application_id
-                        )
-                    )
-
-            # ------------------------------------------------
-            # Leader panels
-            # ------------------------------------------------
-
-            for clan_id in self.data[
-                "clans"
-            ]:
-
-                self.bot.add_view(
-                    self.LeaderPanelView(
-                        self,
-                        clan_id
-                    )
-                )
-
-            # ------------------------------------------------
-            # Invitations
-            # ------------------------------------------------
-
-            for invite_id in self.data[
-                "invites"
-            ]:
-
-                self.bot.add_view(
-                    self.ClanInviteView(
-                        self,
-                        invite_id
-                    )
-                )
-
-            print(
-                "✅ Clan persistent views restored"
+            await interaction.response.send_message(
+                "❌ Clan not found.",
+                ephemeral=True
             )
 
-        except Exception as e:
+            return
 
-            print(
-                f"❌ Failed restoring clan views: {e}"
+        guild = interaction.guild
+
+        channels = [
+
+            clan.get(
+                "member_text_id"
+            ),
+
+            clan.get(
+                "general_voice_id"
+            ),
+
+            clan.get(
+                "leader_channel_id"
+            ),
+
+            clan.get(
+                "leader_voice_id"
+            ),
+
+            clan.get(
+                "category_id"
+            ),
+
+            clan.get(
+                "leader_category_id"
+            )
+        ]
+
+        for channel_id in channels:
+
+            channel = get_channel(
+                guild,
+                channel_id
             )
 
+            if channel:
 
-    # ========================================================
-    # COG LOAD
-    # ========================================================
+                try:
+
+                    await channel.delete(
+                        reason="Clan deleted by moderator"
+                    )
+
+                except Exception:
+                    pass
+
+        roles = [
+
+            clan.get(
+                "member_role_id"
+            ),
+
+            clan.get(
+                "clan_moderator_role_id"
+            ),
+
+            clan.get(
+                "leader_role_id"
+            )
+        ]
+
+        for role_id in roles:
+
+            role = get_role(
+                guild,
+                role_id
+            )
+
+            if role:
+
+                try:
+
+                    await role.delete(
+                        reason="Clan deleted"
+                    )
+
+                except Exception:
+                    pass
+
+        data = get_guild_data(
+            guild.id
+        )
+
+        data["clans"].pop(
+            self.clan_id,
+            None
+        )
+
+        await save_data()
+
+        await interaction.response.send_message(
+            f"🗑️ **{clan['clan_name']}** was deleted.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# COG
+# ============================================================
+
+class Clan(
+    commands.Cog
+):
+
+    clan = app_commands.Group(
+        name="clan",
+        description="Clan system"
+    )
+
+    def __init__(
+        self,
+        bot
+    ):
+
+        self.bot = bot
 
     async def cog_load(
         self
     ):
 
-        await self.restore_views()
+        global clan_data
 
-        print(
-            "🏰 Clan system ready | "
-            f"{len(self.data['clans'])} clans | "
-            f"{len(self.data['applications'])} applications"
+        clan_data = normalize_data(
+            clan_data
         )
 
+        await save_data()
 
-    # ========================================================
-    # COG UNLOAD
-    # ========================================================
+        print(
+            "[CLAN] Clan cog loaded."
+        )
 
-    async def cog_unload(
+    @commands.Cog.listener()
+    async def on_ready(
         self
     ):
 
-        try:
+        # Application form
+        self.bot.add_view(
+            ClanApplicationView()
+        )
 
-            self.save_config()
-            self.save_data()
+        # Restore pending approval buttons
+        for guild_data in clan_data.get(
+            "guilds",
+            {}
+        ).values():
 
-            print(
-                "💾 Clan configuration saved"
+            for application_id in guild_data.get(
+                "pending",
+                {}
+            ).keys():
+
+                self.bot.add_view(
+                    ClanApprovalView(
+                        application_id
+                    )
+                )
+
+            # Restore leader panels
+            for clan_id in guild_data.get(
+                "clans",
+                {}
+            ).keys():
+
+                self.bot.add_view(
+                    LeaderManagementView(
+                        clan_id
+                    )
+                )
+
+        print(
+            "[CLAN] Persistent views registered."
+        )
+
+    # ========================================================
+    # SET APPLICATION CHANNEL
+    # ========================================================
+
+    @clan.command(
+        name="setapplication",
+        description="Set the clan application review channel"
+    )
+    @app_commands.describe(
+        channel="Channel where moderators receive applications"
+    )
+    async def setapplication(
+        self,
+        interaction,
+        channel: discord.TextChannel
+    ):
+
+        if not interaction.user.guild_permissions.administrator:
+
+            await interaction.response.send_message(
+                "❌ Administrator permission required.",
+                ephemeral=True
             )
 
-        except Exception as e:
+            return
 
-            print(
-                f"❌ Clan save error: {e}"
+        data = get_guild_data(
+            interaction.guild.id
+        )
+
+        data[
+            "application_channel_id"
+        ] = channel.id
+
+        await save_data()
+
+        await interaction.response.send_message(
+            (
+                "✅ Clan applications will be sent to "
+                f"{channel.mention}."
+            ),
+            ephemeral=True
+        )
+
+    # ========================================================
+    # SET LOG CHANNEL
+    # ========================================================
+
+    @clan.command(
+        name="setlogs",
+        description="Set the clan log channel"
+    )
+    @app_commands.describe(
+        channel="Clan log channel"
+    )
+    async def setlogs(
+        self,
+        interaction,
+        channel: discord.TextChannel
+    ):
+
+        if not interaction.user.guild_permissions.administrator:
+
+            await interaction.response.send_message(
+                "❌ Administrator permission required.",
+                ephemeral=True
             )
+
+            return
+
+        data = get_guild_data(
+            interaction.guild.id
+        )
+
+        data[
+            "log_channel_id"
+        ] = channel.id
+
+        await save_data()
+
+        await interaction.response.send_message(
+            f"✅ Clan logs set to {channel.mention}.",
+            ephemeral=True
+        )
+
+    # ========================================================
+    # POST APPLICATION FORM
+    # ========================================================
+
+    @clan.command(
+        name="postform",
+        description="Post the clan application form"
+    )
+    async def postform(
+        self,
+        interaction
+    ):
+
+        if not interaction.user.guild_permissions.administrator:
+
+            await interaction.response.send_message(
+                "❌ Administrator permission required.",
+                ephemeral=True
+            )
+
+            return
+
+        data = get_guild_data(
+            interaction.guild.id
+        )
+
+        if not data.get(
+            "application_channel_id"
+        ):
+
+            await interaction.response.send_message(
+                (
+                    "❌ Set the moderator application "
+                    "channel first using:\n"
+                    "`/clan setapplication`"
+                ),
+                ephemeral=True
+            )
+
+            return
+
+        embed = discord.Embed(
+            title="⚔️ Create a Clan",
+            description=(
+                "Want to create your own clan?\n\n"
+                "Click **Apply for a Clan** below "
+                "and submit your application.\n\n"
+                "A moderator will review it before "
+                "the clan is created."
+            ),
+            color=discord.Color.blurple()
+        )
+
+        embed.add_field(
+            name="After approval",
+            value=(
+                "⚔️ Clan category\n"
+                "👤 Member role\n"
+                "🛡️ Clan moderator role\n"
+                "👑 Leader role\n"
+                "💬 Clan chat\n"
+                "🎙️ Voice channel\n"
+                "📋 Leader management channel\n"
+                "🎙️ Leader voice channel"
+            ),
+            inline=False
+        )
+
+        await interaction.channel.send(
+            embed=embed,
+            view=ClanApplicationView()
+        )
+
+        await interaction.response.send_message(
+            "✅ Clan application form posted.",
+            ephemeral=True
+        )
+
+    # ========================================================
+    # MODERATOR /CLANS
+    # ========================================================
+
+    @app_commands.command(
+        name="clans",
+        description="Open the moderator clan management panel"
+    )
+    async def clans(
+        self,
+        interaction
+    ):
+
+        if not is_moderator(
+            interaction.user
+        ):
+
+            await interaction.response.send_message(
+                "❌ Moderator permission required.",
+                ephemeral=True
+            )
+
+            return
+
+        data = get_guild_data(
+            interaction.guild.id
+        )
+
+        if not data[
+            "clans"
+        ]:
+
+            await interaction.response.send_message(
+                "ℹ️ No clans exist yet.",
+                ephemeral=True
+            )
+
+            return
+
+        embed = discord.Embed(
+            title="⚔️ Clan Administration",
+            description=(
+                "Select a clan below to manage it."
+            ),
+            color=discord.Color.blurple()
+        )
+
+        for clan in list(
+            data["clans"].values()
+        )[:10]:
+
+            embed.add_field(
+                name=clan.get(
+                    "clan_name",
+                    "Unknown"
+                ),
+                value=(
+                    f"Owner: <@{clan.get('owner_id')}>\n"
+                    f"Members: "
+                    f"{len(clan.get('members', []))}\n"
+                    f"Category: "
+                    f"<#{clan.get('category_id')}>"
+                ),
+                inline=False
+            )
+
+        await interaction.response.send_message(
+            embed=embed,
+            view=ModeratorClanSelectView(
+                data["clans"]
+            ),
+            ephemeral=True
+        )
 
 
 # ============================================================
@@ -4447,9 +3631,9 @@ async def setup(
 ):
 
     await bot.add_cog(
-        Clans(bot)
+        Clan(bot)
     )
 
     print(
-        "📦 Clans cog loaded"
+        "[CLAN] Extension loaded successfully."
     )
