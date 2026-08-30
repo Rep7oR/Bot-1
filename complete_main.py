@@ -138,7 +138,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 
     
-
 # ---------- LOAD COGS ----------
 async def load_cogs():
     """Load all cogs from the cogs folder"""
@@ -148,60 +147,107 @@ async def load_cogs():
     if not os.path.exists(cogs_folder):
         os.makedirs(cogs_folder)
 
-    for filename in os.listdir(cogs_folder):
+    # ---------------------------------------------------------
+    # MASTER CONFIG MUST LOAD FIRST
+    # ---------------------------------------------------------
+    # It restores saved configuration before the other
+    # cogs attempt to read their JSON configuration files.
+    # ---------------------------------------------------------
 
-        if filename.endswith(".py") and not filename.startswith("_"):
+    master_cog = "cogs.masterconfig"
 
-            extension = f"cogs.{filename[:-3]}"
+    try:
+        await bot.load_extension(master_cog)
+        print("✅ Loaded master configuration system")
 
-            try:
-                await bot.load_extension(extension)
-                print(f"✅ Loaded cog: {filename}")
+    except Exception as e:
+        print(f"❌ Failed to load masterconfig.py: {e}")
 
-            except Exception as e:
-                print(f"❌ Failed to load {filename}: {e}")
+    # ---------------------------------------------------------
+    # LOAD ALL OTHER COGS
+    # ---------------------------------------------------------
+
+    for filename in sorted(os.listdir(cogs_folder)):
+
+        if not filename.endswith(".py"):
+            continue
+
+        if filename.startswith("_"):
+            continue
+
+        # masterconfig.py was already loaded above
+        if filename.lower() == "masterconfig.py":
+            continue
+
+        extension = f"cogs.{filename[:-3]}"
+
+        try:
+            await bot.load_extension(extension)
+
+            print(f"✅ Loaded cog: {filename}")
+
+        except Exception as e:
+
+            print(
+                f"❌ Failed to load {filename}: {e}"
+            )
 
 
 # ---------- BOT SETUP ----------
 @bot.event
 async def setup_hook():
 
-    # Load all Cogs BEFORE the bot becomes ready
+    # ---------------------------------------------------------
+    # Load masterconfig FIRST
+    # Then automatically load every other Cog
+    # ---------------------------------------------------------
+
     await load_cogs()
 
+    # ---------------------------------------------------------
     # Sync slash commands
+    # ---------------------------------------------------------
+
     try:
+
         synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} commands.")
+
+        print(
+            f"✅ Synced {len(synced)} slash commands."
+        )
 
     except Exception as e:
-        print(f"❌ Failed to sync slash commands: {e}")
 
-
-
+        print(
+            f"❌ Failed to sync slash commands: {e}"
+        )
 
 
 # ---------- BOT STARTUP ----------
 @bot.event
 async def on_ready():
 
-    print(f"Bot online as {bot.user}")
-
-   
+    print(
+        f"🤖 Bot online as {bot.user}"
+    )
 
     keep_alive()
 
     await bot.change_presence(
+
         activity=discord.Activity(
+
             type=discord.ActivityType.watching,
+
             name="Watching the community"
         ),
+
         status=discord.Status.online
     )
 
 
+# ---------- START BOT ----------
 bot.run(DISCORD_TOKEN)
-
 
 
 
