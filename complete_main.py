@@ -286,7 +286,8 @@ async def setup_hook():
             f"❌ Failed to sync slash commands: {e}"
         )
 
-
+# ---------- START WEB SERVER ----------
+keep_alive()
 # ---------- BOT STARTUP ----------
 @bot.event
 async def on_ready():
@@ -295,7 +296,7 @@ async def on_ready():
         f"🤖 Bot online as {bot.user}"
     )
 
-    keep_alive()
+   
 
     await bot.change_presence(
 
