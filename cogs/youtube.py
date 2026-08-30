@@ -7,6 +7,7 @@ import aiohttp
 import asyncio
 import json
 import os
+import time
 from datetime import datetime, timezone
 
 
@@ -34,7 +35,16 @@ UPDATE_INTERVAL_MINUTES = 5
 COUNTER_SUBSCRIBERS = "👥 Subscribers: "
 COUNTER_LIKES = "👍 Likes: "
 COUNTER_VIDEOS = "🎬 Videos: "
-COUNTER_LIVE = "🔴 Live: "
+COUNTER_MEMBERS = "👤 Members: "
+COUNTER_MODERATORS = "🛡️ Online Mods: "
+COUNTER_LIVE = "🟢 LIVE"
+COUNTER_OFFLINE = "🔴 OFFLINE"
+
+MODERATOR_ROLE_NAMES = [
+    "MODERATOR",
+    "Moderators",
+    "Mod",
+]
 
 
 # ============================================================
@@ -54,7 +64,54 @@ def load_config():
             encoding="utf-8"
         ) as file:
 
-            return json.load(file)
+            data = json.load(file)
+
+        # The YouTube configuration must be a dictionary.
+        # Recover gracefully if it was accidentally saved
+        # as a JSON string containing another JSON object.
+        if isinstance(data, str):
+
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                data = {}
+
+        if not isinstance(data, dict):
+
+            print(
+                "⚠️ youtube_config.json has an invalid "
+                "top-level format. Starting with an empty config."
+            )
+
+            return {}
+
+        # Every guild entry must also be a dictionary.
+        # Invalid guild entries are reset so commands such as
+        # /youtubesetup cannot fail with string-index errors.
+        cleaned = {}
+
+        for guild_id, guild_config in data.items():
+
+            if isinstance(guild_config, dict):
+                cleaned[str(guild_id)] = guild_config
+
+            elif isinstance(guild_config, str):
+
+                try:
+                    parsed = json.loads(guild_config)
+
+                    if isinstance(parsed, dict):
+                        cleaned[str(guild_id)] = parsed
+                    else:
+                        cleaned[str(guild_id)] = {}
+
+                except json.JSONDecodeError:
+                    cleaned[str(guild_id)] = {}
+
+            else:
+                cleaned[str(guild_id)] = {}
+
+        return cleaned
 
     except Exception as e:
 
@@ -137,7 +194,14 @@ class YouTubeSystem(commands.Cog):
 
         self.last_live_state = False
 
+        # Live chat state
+        self.live_chat_id = None
+        self.live_chat_video_id = None
+        self.live_chat_page_token = None
+        self.live_chat_next_poll = 0.0
+
         self.youtube_update_loop.start()
+        self.youtube_live_chat_loop.start()
 
         print(
             "✅ YouTube System loaded."
@@ -150,6 +214,7 @@ class YouTubeSystem(commands.Cog):
     def cog_unload(self):
 
         self.youtube_update_loop.cancel()
+        self.youtube_live_chat_loop.cancel()
 
         if self.session:
 
@@ -200,9 +265,34 @@ class YouTubeSystem(commands.Cog):
 
         guild_id = str(guild_id)
 
-        if guild_id not in self.config:
+        # Make sure the top-level config is always a dictionary.
+        if not isinstance(self.config, dict):
+            self.config = {}
 
+        # Create a guild entry when it does not exist.
+        if guild_id not in self.config:
             self.config[guild_id] = {}
+
+        # Repair an existing malformed guild entry.
+        if not isinstance(self.config[guild_id], dict):
+
+            old_value = self.config[guild_id]
+
+            if isinstance(old_value, str):
+
+                try:
+                    parsed = json.loads(old_value)
+
+                    if isinstance(parsed, dict):
+                        self.config[guild_id] = parsed
+                    else:
+                        self.config[guild_id] = {}
+
+                except json.JSONDecodeError:
+                    self.config[guild_id] = {}
+
+            else:
+                self.config[guild_id] = {}
 
         return self.config[guild_id]
 
@@ -493,7 +583,315 @@ class YouTubeSystem(commands.Cog):
 
             return None
 
-        return items[0]
+        video_id = items[0].get("id", {}).get("videoId")
+
+        if not video_id:
+
+            return None
+
+        # The search endpoint does not provide
+        # activeLiveChatId, so fetch the full video
+        # resource with liveStreamingDetails.
+        video_data = await self.youtube_request(
+
+            "videos",
+
+            {
+                "part":
+                    "snippet,liveStreamingDetails",
+
+                "id":
+                    video_id
+            }
+        )
+
+        if not video_data:
+
+            return None
+
+        video_items = video_data.get(
+            "items",
+            []
+        )
+
+        if not video_items:
+
+            return None
+
+        return video_items[0]
+
+    # ========================================================
+    # GET LIVE CHAT MESSAGES
+    # ========================================================
+
+    async def get_live_chat_messages(
+        self,
+        live_chat_id,
+        page_token=None
+    ):
+
+        params = {
+            "part": "snippet",
+            "liveChatId": live_chat_id,
+            "maxResults": 200
+        }
+
+        if page_token:
+            params["pageToken"] = page_token
+
+        return await self.youtube_request(
+            "liveChatMessages",
+            params
+        )
+
+    # ========================================================
+    # SEND LIVE CHAT TO DISCORD
+    # ========================================================
+
+    async def send_live_chat_messages(
+        self,
+        messages
+    ):
+
+        if not messages:
+
+            return
+
+        for guild in self.bot.guilds:
+
+            guild_config = self.config.get(
+                str(guild.id),
+                {}
+            )
+
+            if not guild_config.get(
+                "enabled",
+                False
+            ):
+
+                continue
+
+            channel = self.get_discord_channel(
+                guild,
+                "live_chat_channel_id"
+            )
+
+            if not isinstance(
+                channel,
+                discord.TextChannel
+            ):
+
+                continue
+
+            for message in messages:
+
+                snippet = message.get(
+                    "snippet",
+                    {}
+                )
+
+                author_details = snippet.get(
+                    "authorDetails",
+                    {}
+                )
+
+                # Depending on the message type,
+                # YouTube may provide textMessageDetails
+                # or another displayable message field.
+                text_details = snippet.get(
+                    "textMessageDetails",
+                    {}
+                )
+
+                content = text_details.get(
+                    "messageText"
+                )
+
+                if not content:
+                    content = snippet.get(
+                        "displayMessage"
+                    )
+
+                if not content:
+                    continue
+
+                author = author_details.get(
+                    "displayName",
+                    "YouTube User"
+                )
+
+                content = str(content).strip()
+
+                if not content:
+                    continue
+
+                # Keep the message below Discord's limit.
+                if len(content) > 1850:
+                    content = content[:1850] + "..."
+
+                discord_message = (
+                    f"💬 **{author}:** {content}"
+                )
+
+                try:
+
+                    await channel.send(
+                        discord_message,
+                        allowed_mentions=discord.AllowedMentions.none()
+                    )
+
+                except discord.Forbidden:
+
+                    print(
+                        f"❌ No permission to send "
+                        f"YouTube live chat in "
+                        f"{guild.name}"
+                    )
+
+                except discord.HTTPException as e:
+
+                    print(
+                        f"❌ Discord live chat error "
+                        f"in {guild.name}: {e}"
+                    )
+
+    # ========================================================
+    # LIVE CHAT BACKGROUND LOOP
+    # ========================================================
+
+    @tasks.loop(seconds=5)
+    async def youtube_live_chat_loop(
+        self
+    ):
+
+        if not self.api_ready():
+
+            return
+
+        now = time.monotonic()
+
+        if now < self.live_chat_next_poll:
+
+            return
+
+        live_video = await self.get_live_video()
+
+        if not live_video:
+
+            # Reset chat state after a stream ends.
+            self.live_chat_id = None
+            self.live_chat_video_id = None
+            self.live_chat_page_token = None
+            self.live_chat_next_poll = now + 15
+
+            return
+
+        video_id = live_video.get(
+            "id"
+        )
+
+        live_details = live_video.get(
+            "liveStreamingDetails",
+            {}
+        )
+
+        live_chat_id = live_details.get(
+            "activeLiveChatId"
+        )
+
+        if not live_chat_id:
+
+            # The stream can be live while chat is disabled.
+            self.live_chat_id = None
+            self.live_chat_video_id = video_id
+            self.live_chat_page_token = None
+            self.live_chat_next_poll = now + 30
+
+            return
+
+        # New live stream: reset the page token.
+        if (
+            live_chat_id
+            != self.live_chat_id
+            or
+            video_id
+            != self.live_chat_video_id
+        ):
+
+            self.live_chat_id = live_chat_id
+            self.live_chat_video_id = video_id
+            self.live_chat_page_token = None
+
+        try:
+
+            data = await self.get_live_chat_messages(
+                live_chat_id,
+                self.live_chat_page_token
+            )
+
+            if not data:
+
+                self.live_chat_next_poll = (
+                    time.monotonic() + 10
+                )
+
+                return
+
+            messages = data.get(
+                "items",
+                []
+            )
+
+            self.live_chat_page_token = data.get(
+                "nextPageToken"
+            )
+
+            polling_interval_ms = data.get(
+                "pollingIntervalMillis",
+                10000
+            )
+
+            try:
+                polling_interval_ms = int(
+                    polling_interval_ms
+                )
+            except (TypeError, ValueError):
+                polling_interval_ms = 10000
+
+            # Always respect YouTube's requested polling interval.
+            polling_seconds = max(
+                polling_interval_ms / 1000,
+                5
+            )
+
+            self.live_chat_next_poll = (
+                time.monotonic() + polling_seconds
+            )
+
+            await self.send_live_chat_messages(
+                messages
+            )
+
+        except Exception as e:
+
+            print(
+                f"❌ YouTube live chat error: {e}"
+            )
+
+            self.live_chat_next_poll = (
+                time.monotonic() + 15
+            )
+
+    @youtube_live_chat_loop.before_loop
+    async def before_youtube_live_chat_loop(
+        self
+    ):
+
+        await self.bot.wait_until_ready()
+
+        print(
+            "💬 YouTube live chat monitoring started."
+        )
 
     # ========================================================
     # GET LATEST VIDEO
@@ -623,6 +1021,31 @@ class YouTubeSystem(commands.Cog):
         return None
 
     # ========================================================
+    # MEMBER / MODERATOR COUNTS
+    # ========================================================
+
+    def count_online_moderators(self, guild):
+
+        count = 0
+
+        for member in guild.members:
+
+            is_moderator = any(
+                role.name in MODERATOR_ROLE_NAMES
+                for role in member.roles
+            )
+
+            if not is_moderator:
+                continue
+
+            # Count members who are online, idle, or DND.
+            # Offline also covers users appearing invisible.
+            if member.status != discord.Status.offline:
+                count += 1
+
+        return count
+
+    # ========================================================
     # CREATE / UPDATE COUNTER
     # ========================================================
 
@@ -632,6 +1055,8 @@ class YouTubeSystem(commands.Cog):
         subscribers,
         likes,
         videos,
+        members,
+        online_moderators,
         live
     ):
 
@@ -663,10 +1088,23 @@ class YouTubeSystem(commands.Cog):
                     f"{format_number(videos)}"
                 ),
 
+            "member_counter_id":
+                (
+                    f"{COUNTER_MEMBERS}"
+                    f"{format_number(members)}"
+                ),
+
+            "moderator_counter_id":
+                (
+                    f"{COUNTER_MODERATORS}"
+                    f"{format_number(online_moderators)}"
+                ),
+
             "live_counter_id":
                 (
-                    f"{COUNTER_LIVE}"
-                    f"{'YES' if live else 'NO'}"
+                    COUNTER_LIVE
+                    if live
+                    else COUNTER_OFFLINE
                 )
         }
 
@@ -678,6 +1116,8 @@ class YouTubeSystem(commands.Cog):
             "subscriber_counter_id",
             "likes_counter_id",
             "videos_counter_id",
+            "member_counter_id",
+            "moderator_counter_id",
             "live_counter_id"
         ]
 
@@ -943,7 +1383,7 @@ class YouTubeSystem(commands.Cog):
 
             try:
 
-                await notification_channel.send(
+                message = await notification_channel.send(
 
                     content="@everyone",
 
@@ -952,6 +1392,20 @@ class YouTubeSystem(commands.Cog):
                     allowed_mentions=discord.AllowedMentions(
                         everyone=True
                     )
+                )
+
+                # Save the live notification message ID so it
+                # can be deleted automatically when the stream ends.
+                guild_config = self.get_guild_config(
+                    guild.id
+                )
+
+                guild_config[
+                    "live_notification_message_id"
+                ] = message.id
+
+                save_config(
+                    self.config
                 )
 
             except discord.HTTPException as e:
@@ -988,6 +1442,73 @@ class YouTubeSystem(commands.Cog):
                 print(
                     f"❌ Live chat notification error: {e}"
                 )
+
+    # ========================================================
+    # DELETE LIVE START NOTIFICATION
+    # ========================================================
+
+    async def delete_live_notification(
+        self,
+        guild
+    ):
+
+        guild_config = self.get_guild_config(
+            guild.id
+        )
+
+        message_id = guild_config.get(
+            "live_notification_message_id"
+        )
+
+        if not message_id:
+
+            return
+
+        notification_channel = (
+            self.get_discord_channel(
+                guild,
+                "notification_channel_id"
+            )
+        )
+
+        if notification_channel is None:
+
+            guild_config.pop(
+                "live_notification_message_id",
+                None
+            )
+
+            save_config(
+                self.config
+            )
+
+            return
+
+        try:
+
+            message = await notification_channel.fetch_message(
+                int(message_id)
+            )
+
+            await message.delete()
+
+        except (
+            discord.NotFound,
+            discord.Forbidden,
+            discord.HTTPException
+        ):
+
+            pass
+
+        # Clear the saved message ID after attempting deletion.
+        guild_config.pop(
+            "live_notification_message_id",
+            None
+        )
+
+        save_config(
+            self.config
+        )
 
     # ========================================================
     # UPDATE EVERYTHING
@@ -1062,6 +1583,9 @@ class YouTubeSystem(commands.Cog):
             # UPDATE COUNTERS
             # ------------------------------------------------
 
+            members = guild.member_count or len(guild.members)
+            online_moderators = self.count_online_moderators(guild)
+
             await self.update_counter(
 
                 guild,
@@ -1072,8 +1596,15 @@ class YouTubeSystem(commands.Cog):
 
                 videos,
 
+                members,
+
+                online_moderators,
+
                 is_live
             )
+
+            guild_config["last_live_state"] = is_live
+            save_config(self.config)
 
             # ------------------------------------------------
             # CHECK LIVE START
@@ -1098,6 +1629,12 @@ class YouTubeSystem(commands.Cog):
                 )
             ):
 
+                # Remove any stale previous live notification
+                # before creating the new one.
+                await self.delete_live_notification(
+                    guild
+                )
+
                 await self.send_live_notification(
 
                     guild,
@@ -1115,42 +1652,11 @@ class YouTubeSystem(commands.Cog):
                 self.last_live_state
             ):
 
-                end_channel = (
-                    self.get_discord_channel(
-                        guild,
-                        "notification_channel_id"
-                    )
+                # Remove the previous "WE ARE LIVE!" notification
+                # automatically when the stream is no longer live.
+                await self.delete_live_notification(
+                    guild
                 )
-
-                if end_channel:
-
-                    try:
-
-                        embed = discord.Embed(
-
-                            title="⚫ Stream Ended",
-
-                            description=(
-
-                                "The YouTube livestream "
-                                "has ended.\n\n"
-                                "Thanks for watching!"
-                            ),
-
-                            color=discord.Color.dark_grey(),
-
-                            timestamp=datetime.now(
-                                timezone.utc
-                            )
-                        )
-
-                        await end_channel.send(
-                            embed=embed
-                        )
-
-                    except:
-
-                        pass
 
             # ------------------------------------------------
             # CHECK NEW UPLOAD
@@ -1352,7 +1858,12 @@ class YouTubeSystem(commands.Cog):
             f"{upload_channel.mention}\n\n"
 
             "The bot will now monitor the configured "
-            "YouTube channel.",
+            "YouTube channel.\n\n"
+            "💬 YouTube Live Chat will be relayed to "
+            "the configured live channel when the stream "
+            "is live.\n"
+            "🔴 The live notification will be removed "
+            "automatically when the stream ends.",
 
             ephemeral=True
         )
@@ -1764,6 +2275,10 @@ class YouTubeSystem(commands.Cog):
 
             f"📊 **Counter Category:** "
             f"{category.mention if category else 'Not configured'}\n\n"
+
+            f"👤 **Members:** `{interaction.guild.member_count or 0}`\n"
+            f"🛡️ **Online Moderators:** `{self.count_online_moderators(interaction.guild)}`\n"
+            f"🔴 **Live:** `{'LIVE' if guild_config.get('last_live_state', False) else 'OFFLINE'}`\n\n"
 
             f"🔑 **API:** "
             f"`{'Configured' if self.api_ready() else 'Not configured'}`",
