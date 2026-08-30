@@ -1,836 +1,836 @@
-import discord
-from discord.ext import commands
-from discord import app_commands
+# import discord
+# from discord.ext import commands
+# from discord import app_commands
 
-import json
-import os
-import traceback
+# import json
+# import os
+# import traceback
 
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
+# # ============================================================
+# # CONFIGURATION
+# # ============================================================
 
-CONFIG_FILE = "bot_config.json"
+# CONFIG_FILE = "bot_config.json"
 
 
-# ============================================================
-# LOAD CONFIGURATION
-# ============================================================
+# # ============================================================
+# # LOAD CONFIGURATION
+# # ============================================================
 
-def load_config():
+# def load_config():
 
-    if not os.path.exists(CONFIG_FILE):
+#     if not os.path.exists(CONFIG_FILE):
 
-        return {}
+#         return {}
 
-    try:
+#     try:
 
-        with open(
-            CONFIG_FILE,
-            "r",
-            encoding="utf-8"
-        ) as f:
+#         with open(
+#             CONFIG_FILE,
+#             "r",
+#             encoding="utf-8"
+#         ) as f:
 
-            return json.load(f)
+#             return json.load(f)
 
-    except Exception as e:
+#     except Exception as e:
 
-        print(
-            f"❌ Config load error: {e}"
-        )
+#         print(
+#             f"❌ Config load error: {e}"
+#         )
 
-        return {}
+#         return {}
 
 
-# ============================================================
-# SAVE CONFIGURATION
-# ============================================================
+# # ============================================================
+# # SAVE CONFIGURATION
+# # ============================================================
 
-def save_config(config):
+# def save_config(config):
 
-    try:
+#     try:
 
-        with open(
-            CONFIG_FILE,
-            "w",
-            encoding="utf-8"
-        ) as f:
+#         with open(
+#             CONFIG_FILE,
+#             "w",
+#             encoding="utf-8"
+#         ) as f:
 
-            json.dump(
-                config,
-                f,
-                indent=4,
-                ensure_ascii=False
-            )
+#             json.dump(
+#                 config,
+#                 f,
+#                 indent=4,
+#                 ensure_ascii=False
+#             )
 
-        return True
+#         return True
 
-    except Exception as e:
+#     except Exception as e:
 
-        print(
-            f"❌ Config save error: {e}"
-        )
+#         print(
+#             f"❌ Config save error: {e}"
+#         )
 
-        return False
+#         return False
 
 
-# ============================================================
-# REFRESH COG
-# ============================================================
+# # ============================================================
+# # REFRESH COG
+# # ============================================================
 
-class Refresh(commands.Cog):
+# class Refresh(commands.Cog):
 
-    def __init__(
-        self,
-        bot
-    ):
+#     def __init__(
+#         self,
+#         bot
+#     ):
 
-        self.bot = bot
+#         self.bot = bot
 
-        self.config = load_config()
+#         self.config = load_config()
 
-        print(
-            "🔄 Refresh Cog loaded."
-        )
+#         print(
+#             "🔄 Refresh Cog loaded."
+#         )
 
-    # ========================================================
-    # GET GUILD CONFIG
-    # ========================================================
+#     # ========================================================
+#     # GET GUILD CONFIG
+#     # ========================================================
 
-    def get_guild_config(
-        self,
-        guild_id
-    ):
+#     def get_guild_config(
+#         self,
+#         guild_id
+#     ):
 
-        guild_id = str(
-            guild_id
-        )
+#         guild_id = str(
+#             guild_id
+#         )
 
-        if guild_id not in self.config:
+#         if guild_id not in self.config:
 
-            self.config[guild_id] = {}
+#             self.config[guild_id] = {}
 
-        return self.config[guild_id]
+#         return self.config[guild_id]
 
-    # ========================================================
-    # SAVE GUILD CONFIG
-    # ========================================================
+#     # ========================================================
+#     # SAVE GUILD CONFIG
+#     # ========================================================
 
-    def save_guild_config(
-        self,
-        guild_id,
-        cog_name,
-        data
-    ):
+#     def save_guild_config(
+#         self,
+#         guild_id,
+#         cog_name,
+#         data
+#     ):
 
-        guild_config = self.get_guild_config(
-            guild_id
-        )
+#         guild_config = self.get_guild_config(
+#             guild_id
+#         )
 
-        guild_config[cog_name] = data
+#         guild_config[cog_name] = data
 
-        save_config(
-            self.config
-        )
+#         save_config(
+#             self.config
+#         )
 
-    # ========================================================
-    # GET CHANNEL NAME
-    # ========================================================
+#     # ========================================================
+#     # GET CHANNEL NAME
+#     # ========================================================
 
-    def channel_name(
-        self,
-        guild,
-        channel_id
-    ):
+#     def channel_name(
+#         self,
+#         guild,
+#         channel_id
+#     ):
 
-        if not channel_id:
+#         if not channel_id:
 
-            return "Not configured"
+#             return "Not configured"
 
-        try:
+#         try:
 
-            channel = guild.get_channel(
-                int(channel_id)
-            )
+#             channel = guild.get_channel(
+#                 int(channel_id)
+#             )
 
-            if channel:
+#             if channel:
 
-                return channel.mention
+#                 return channel.mention
 
-        except Exception:
+#         except Exception:
 
-            pass
+#             pass
 
-        return (
-            f"Deleted/Missing "
-            f"(`{channel_id}`)"
-        )
+#         return (
+#             f"Deleted/Missing "
+#             f"(`{channel_id}`)"
+#         )
 
-    # ========================================================
-    # GET ROLE NAME
-    # ========================================================
+#     # ========================================================
+#     # GET ROLE NAME
+#     # ========================================================
 
-    def role_name(
-        self,
-        guild,
-        role_id
-    ):
+#     def role_name(
+#         self,
+#         guild,
+#         role_id
+#     ):
 
-        if not role_id:
+#         if not role_id:
 
-            return "Not configured"
+#             return "Not configured"
 
-        try:
+#         try:
 
-            role = guild.get_role(
-                int(role_id)
-            )
+#             role = guild.get_role(
+#                 int(role_id)
+#             )
 
-            if role:
+#             if role:
 
-                return role.mention
+#                 return role.mention
 
-        except Exception:
+#         except Exception:
 
-            pass
+#             pass
 
-        return (
-            f"Deleted/Missing "
-            f"(`{role_id}`)"
-        )
+#         return (
+#             f"Deleted/Missing "
+#             f"(`{role_id}`)"
+#         )
 
-    # ========================================================
-    # GET CATEGORY NAME
-    # ========================================================
+#     # ========================================================
+#     # GET CATEGORY NAME
+#     # ========================================================
 
-    def category_name(
-        self,
-        guild,
-        category_id
-    ):
+#     def category_name(
+#         self,
+#         guild,
+#         category_id
+#     ):
 
-        if not category_id:
+#         if not category_id:
 
-            return "Not configured"
+#             return "Not configured"
 
-        try:
+#         try:
 
-            category = guild.get_channel(
-                int(category_id)
-            )
+#             category = guild.get_channel(
+#                 int(category_id)
+#             )
 
-            if category:
+#             if category:
 
-                return category.name
+#                 return category.name
 
-        except Exception:
+#         except Exception:
 
-            pass
+#             pass
 
-        return (
-            f"Deleted/Missing "
-            f"(`{category_id}`)"
-        )
+#         return (
+#             f"Deleted/Missing "
+#             f"(`{category_id}`)"
+#         )
 
-    # ========================================================
-    # DISCOVER COMMANDS
-    # ========================================================
+#     # ========================================================
+#     # DISCOVER COMMANDS
+#     # ========================================================
 
-    def get_commands_for_cog(
-        self,
-        cog
-    ):
+#     def get_commands_for_cog(
+#         self,
+#         cog
+#     ):
 
-        found = []
+#         found = []
 
-        # ----------------------------------------------------
-        # SLASH COMMANDS
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # SLASH COMMANDS
+#         # ----------------------------------------------------
 
-        for command in self.bot.tree.walk_commands():
+#         for command in self.bot.tree.walk_commands():
 
-            try:
+#             try:
 
-                binding = getattr(
-                    command,
-                    "binding",
-                    None
-                )
+#                 binding = getattr(
+#                     command,
+#                     "binding",
+#                     None
+#                 )
 
-                if binding is cog:
+#                 if binding is cog:
 
-                    found.append(
-                        f"/{command.qualified_name}"
-                    )
+#                     found.append(
+#                         f"/{command.qualified_name}"
+#                     )
 
-            except Exception:
+#             except Exception:
 
-                continue
+#                 continue
 
-        # ----------------------------------------------------
-        # PREFIX COMMANDS
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # PREFIX COMMANDS
+#         # ----------------------------------------------------
 
-        for command in self.bot.commands:
+#         for command in self.bot.commands:
 
-            try:
+#             try:
 
-                command_cog = getattr(
-                    command,
-                    "cog",
-                    None
-                )
+#                 command_cog = getattr(
+#                     command,
+#                     "cog",
+#                     None
+#                 )
 
-                if command_cog is cog:
+#                 if command_cog is cog:
 
-                    found.append(
-                        f"!{command.name}"
-                    )
+#                     found.append(
+#                         f"!{command.name}"
+#                     )
 
-            except Exception:
+#             except Exception:
 
-                continue
+#                 continue
 
-        return sorted(
-            set(found)
-        )
+#         return sorted(
+#             set(found)
+#         )
 
-    # ========================================================
-    # REFRESH ONE COG
-    # ========================================================
+#     # ========================================================
+#     # REFRESH ONE COG
+#     # ========================================================
 
-    async def refresh_cog(
-        self,
-        cog_name,
-        cog,
-        guild
-    ):
+#     async def refresh_cog(
+#         self,
+#         cog_name,
+#         cog,
+#         guild
+#     ):
 
-        # ----------------------------------------------------
-        # First preference:
-        #
-        # get_setup_info()
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # First preference:
+#         #
+#         # get_setup_info()
+#         # ----------------------------------------------------
 
-        setup_info = getattr(
-            cog,
-            "get_setup_info",
-            None
-        )
+#         setup_info = getattr(
+#             cog,
+#             "get_setup_info",
+#             None
+#         )
 
-        # ----------------------------------------------------
-        # If cog provides setup information
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # If cog provides setup information
+#         # ----------------------------------------------------
 
-        if callable(
-            setup_info
-        ):
+#         if callable(
+#             setup_info
+#         ):
 
-            try:
+#             try:
 
-                result = await setup_info(
-                    guild
-                )
+#                 result = await setup_info(
+#                     guild
+#                 )
 
-                if isinstance(
-                    result,
-                    dict
-                ):
+#                 if isinstance(
+#                     result,
+#                     dict
+#                 ):
 
-                    return result
+#                     return result
 
-                return {
-                    "status": "✅",
-                    "message": str(
-                        result
-                    )
-                }
+#                 return {
+#                     "status": "✅",
+#                     "message": str(
+#                         result
+#                     )
+#                 }
 
-            except TypeError:
+#             except TypeError:
 
-                # Some cogs may use
-                # get_setup_info() without guild
+#                 # Some cogs may use
+#                 # get_setup_info() without guild
 
-                try:
+#                 try:
 
-                    result = await setup_info()
+#                     result = await setup_info()
 
-                    if isinstance(
-                        result,
-                        dict
-                    ):
+#                     if isinstance(
+#                         result,
+#                         dict
+#                     ):
 
-                        return result
+#                         return result
 
-                    return {
-                        "status": "✅",
-                        "message": str(
-                            result
-                        )
-                    }
+#                     return {
+#                         "status": "✅",
+#                         "message": str(
+#                             result
+#                         )
+#                     }
 
-                except Exception as e:
+#                 except Exception as e:
 
-                    return {
-                        "status": "❌",
-                        "message": (
-                            f"{type(e).__name__}: {e}"
-                        )
-                    }
+#                     return {
+#                         "status": "❌",
+#                         "message": (
+#                             f"{type(e).__name__}: {e}"
+#                         )
+#                     }
 
-            except Exception as e:
+#             except Exception as e:
 
-                traceback.print_exc()
+#                 traceback.print_exc()
 
-                return {
-                    "status": "❌",
-                    "message": (
-                        f"{type(e).__name__}: {e}"
-                    )
-                }
+#                 return {
+#                     "status": "❌",
+#                     "message": (
+#                         f"{type(e).__name__}: {e}"
+#                     )
+#                 }
 
-        # ----------------------------------------------------
-        # Second preference:
-        #
-        # refresh()
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Second preference:
+#         #
+#         # refresh()
+#         # ----------------------------------------------------
 
-        refresh_function = getattr(
-            cog,
-            "refresh",
-            None
-        )
+#         refresh_function = getattr(
+#             cog,
+#             "refresh",
+#             None
+#         )
 
-        if callable(
-            refresh_function
-        ):
+#         if callable(
+#             refresh_function
+#         ):
 
-            try:
+#             try:
 
-                result = await refresh_function()
+#                 result = await refresh_function()
 
-                if isinstance(
-                    result,
-                    dict
-                ):
+#                 if isinstance(
+#                     result,
+#                     dict
+#                 ):
 
-                    return result
+#                     return result
 
-                return {
-                    "status": "✅",
-                    "message": (
-                        str(result)
-                        if result
-                        else "Refresh completed."
-                    )
-                }
+#                 return {
+#                     "status": "✅",
+#                     "message": (
+#                         str(result)
+#                         if result
+#                         else "Refresh completed."
+#                     )
+#                 }
 
-            except Exception as e:
+#             except Exception as e:
 
-                traceback.print_exc()
+#                 traceback.print_exc()
 
-                return {
-                    "status": "❌",
-                    "message": (
-                        f"{type(e).__name__}: {e}"
-                    )
-                }
+#                 return {
+#                     "status": "❌",
+#                     "message": (
+#                         f"{type(e).__name__}: {e}"
+#                     )
+#                 }
 
-        # ----------------------------------------------------
-        # No setup handler
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # No setup handler
+#         # ----------------------------------------------------
 
-        return {
-            "status": "⚪",
-            "message": (
-                "No configuration reader "
-                "in this Cog."
-            )
-        }
+#         return {
+#             "status": "⚪",
+#             "message": (
+#                 "No configuration reader "
+#                 "in this Cog."
+#             )
+#         }
 
-    # ========================================================
-    # /REFRESH
-    # ========================================================
+#     # ========================================================
+#     # /REFRESH
+#     # ========================================================
 
-    @app_commands.command(
-        name="refresh",
-        description=(
-            "Check and display all bot configuration."
-        )
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def refresh(
-        self,
-        interaction: discord.Interaction
-    ):
+#     @app_commands.command(
+#         name="refresh",
+#         description=(
+#             "Check and display all bot configuration."
+#         )
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def refresh(
+#         self,
+#         interaction: discord.Interaction
+#     ):
 
-        if interaction.guild is None:
+#         if interaction.guild is None:
 
-            await interaction.response.send_message(
-                "❌ This command can only be used in a server.",
-                ephemeral=True
-            )
+#             await interaction.response.send_message(
+#                 "❌ This command can only be used in a server.",
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        await interaction.response.defer(
-            ephemeral=True
-        )
+#         await interaction.response.defer(
+#             ephemeral=True
+#         )
 
-        guild = interaction.guild
+#         guild = interaction.guild
 
-        print("")
-        print(
-            "========================================"
-        )
-        print(
-            "        MASTER CONFIG REFRESH"
-        )
-        print(
-            "========================================"
-        )
+#         print("")
+#         print(
+#             "========================================"
+#         )
+#         print(
+#             "        MASTER CONFIG REFRESH"
+#         )
+#         print(
+#             "========================================"
+#         )
 
-        results = []
+#         results = []
 
-        # ====================================================
-        # CHECK EVERY LOADED COG
-        # ====================================================
+#         # ====================================================
+#         # CHECK EVERY LOADED COG
+#         # ====================================================
 
-        for cog_name, cog in self.bot.cogs.items():
+#         for cog_name, cog in self.bot.cogs.items():
 
-            # Don't report Refresh itself
-            if cog_name == "Refresh":
+#             # Don't report Refresh itself
+#             if cog_name == "Refresh":
 
-                continue
+#                 continue
 
-            print(
-                f"🔄 Checking {cog_name}"
-            )
+#             print(
+#                 f"🔄 Checking {cog_name}"
+#             )
 
-            result = await self.refresh_cog(
-                cog_name,
-                cog,
-                guild
-            )
+#             result = await self.refresh_cog(
+#                 cog_name,
+#                 cog,
+#                 guild
+#             )
 
-            commands_list = (
-                self.get_commands_for_cog(
-                    cog
-                )
-            )
+#             commands_list = (
+#                 self.get_commands_for_cog(
+#                     cog
+#                 )
+#             )
 
-            result["commands"] = (
-                commands_list
-            )
+#             result["commands"] = (
+#                 commands_list
+#             )
 
-            results.append(
-                (
-                    cog_name,
-                    result
-                )
-            )
+#             results.append(
+#                 (
+#                     cog_name,
+#                     result
+#                 )
+#             )
 
-        # ====================================================
-        # CREATE EMBEDS
-        # ====================================================
+#         # ====================================================
+#         # CREATE EMBEDS
+#         # ====================================================
 
-        embeds = []
+#         embeds = []
 
-        current_embed = discord.Embed(
+#         current_embed = discord.Embed(
 
-            title="🔄 Bot Configuration",
+#             title="🔄 Bot Configuration",
 
-            description=(
-                f"Configuration report for "
-                f"**{guild.name}**\n\n"
-                "All loaded Cog files have been checked."
-            ),
+#             description=(
+#                 f"Configuration report for "
+#                 f"**{guild.name}**\n\n"
+#                 "All loaded Cog files have been checked."
+#             ),
 
-            color=discord.Color.blue()
-        )
+#             color=discord.Color.blue()
+#         )
 
-        field_count = 0
+#         field_count = 0
 
-        # ====================================================
-        # ADD COG RESULTS
-        # ====================================================
+#         # ====================================================
+#         # ADD COG RESULTS
+#         # ====================================================
 
-        for cog_name, result in results:
+#         for cog_name, result in results:
 
-            status = result.get(
-                "status",
-                "⚪"
-            )
+#             status = result.get(
+#                 "status",
+#                 "⚪"
+#             )
 
-            message = result.get(
-                "message",
-                "No information."
-            )
+#             message = result.get(
+#                 "message",
+#                 "No information."
+#             )
 
-            commands_list = result.get(
-                "commands",
-                []
-            )
+#             commands_list = result.get(
+#                 "commands",
+#                 []
+#             )
 
-            # ------------------------------------------------
-            # Commands
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Commands
+#             # ------------------------------------------------
 
-            if commands_list:
+#             if commands_list:
 
-                command_text = "\n".join(
-                    f"`{command}`"
-                    for command in commands_list
-                )
+#                 command_text = "\n".join(
+#                     f"`{command}`"
+#                     for command in commands_list
+#                 )
 
-                if len(command_text) > 700:
+#                 if len(command_text) > 700:
 
-                    command_text = (
-                        command_text[:700]
-                        + "\n`...more commands...`"
-                    )
+#                     command_text = (
+#                         command_text[:700]
+#                         + "\n`...more commands...`"
+#                     )
 
-            else:
+#             else:
 
-                command_text = (
-                    "No commands detected."
-                )
+#                 command_text = (
+#                     "No commands detected."
+#                 )
 
-            # ------------------------------------------------
-            # Field
-            # ------------------------------------------------
+#             # ------------------------------------------------
+#             # Field
+#             # ------------------------------------------------
 
-            value = (
-                f"{status} {message}\n\n"
-                f"⚙️ **Commands:**\n"
-                f"{command_text}"
-            )
+#             value = (
+#                 f"{status} {message}\n\n"
+#                 f"⚙️ **Commands:**\n"
+#                 f"{command_text}"
+#             )
 
-            if len(value) > 1024:
+#             if len(value) > 1024:
 
-                value = (
-                    value[:1020]
-                    + "..."
-                )
+#                 value = (
+#                     value[:1020]
+#                     + "..."
+#                 )
 
-            current_embed.add_field(
+#             current_embed.add_field(
 
-                name=(
-                    f"📦 {cog_name}"
-                ),
+#                 name=(
+#                     f"📦 {cog_name}"
+#                 ),
 
-                value=value,
+#                 value=value,
 
-                inline=False
-            )
+#                 inline=False
+#             )
 
-            field_count += 1
+#             field_count += 1
 
-            # Discord embeds allow max 25 fields
-            if field_count >= 20:
+#             # Discord embeds allow max 25 fields
+#             if field_count >= 20:
 
-                embeds.append(
-                    current_embed
-                )
+#                 embeds.append(
+#                     current_embed
+#                 )
 
-                current_embed = discord.Embed(
+#                 current_embed = discord.Embed(
 
-                    title=(
-                        "🔄 Bot Configuration "
-                        "— Continued"
-                    ),
+#                     title=(
+#                         "🔄 Bot Configuration "
+#                         "— Continued"
+#                     ),
 
-                    color=discord.Color.blue()
-                )
+#                     color=discord.Color.blue()
+#                 )
 
-                field_count = 0
+#                 field_count = 0
 
-        # ----------------------------------------------------
-        # Add remaining embed
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Add remaining embed
+#         # ----------------------------------------------------
 
-        if field_count > 0:
+#         if field_count > 0:
 
-            embeds.append(
-                current_embed
-            )
+#             embeds.append(
+#                 current_embed
+#             )
 
-        # ====================================================
-        # SUMMARY
-        # ====================================================
+#         # ====================================================
+#         # SUMMARY
+#         # ====================================================
 
-        successful = sum(
+#         successful = sum(
 
-            1
-            for _, result in results
-            if result.get(
-                "status"
-            ) == "✅"
+#             1
+#             for _, result in results
+#             if result.get(
+#                 "status"
+#             ) == "✅"
 
-        )
+#         )
 
-        failed = sum(
+#         failed = sum(
 
-            1
-            for _, result in results
-            if result.get(
-                "status"
-            ) == "❌"
+#             1
+#             for _, result in results
+#             if result.get(
+#                 "status"
+#             ) == "❌"
 
-        )
+#         )
 
-        no_handler = sum(
+#         no_handler = sum(
 
-            1
-            for _, result in results
-            if result.get(
-                "status"
-            ) == "⚪"
+#             1
+#             for _, result in results
+#             if result.get(
+#                 "status"
+#             ) == "⚪"
 
-        )
+#         )
 
-        total_commands = sum(
+#         total_commands = sum(
 
-            len(
-                result.get(
-                    "commands",
-                    []
-                )
-            )
+#             len(
+#                 result.get(
+#                     "commands",
+#                     []
+#                 )
+#             )
 
-            for _, result in results
+#             for _, result in results
 
-        )
+#         )
 
-        summary = discord.Embed(
+#         summary = discord.Embed(
 
-            title="📊 Refresh Summary",
+#             title="📊 Refresh Summary",
 
-            description=(
+#             description=(
 
-                f"📦 **Cogs checked:** "
-                f"`{len(results)}`\n\n"
+#                 f"📦 **Cogs checked:** "
+#                 f"`{len(results)}`\n\n"
 
-                f"✅ **Configured/checked:** "
-                f"`{successful}`\n"
+#                 f"✅ **Configured/checked:** "
+#                 f"`{successful}`\n"
 
-                f"❌ **Errors:** "
-                f"`{failed}`\n"
+#                 f"❌ **Errors:** "
+#                 f"`{failed}`\n"
 
-                f"⚪ **No setup reader:** "
-                f"`{no_handler}`\n\n"
+#                 f"⚪ **No setup reader:** "
+#                 f"`{no_handler}`\n\n"
 
-                f"⚙️ **Commands detected:** "
-                f"`{total_commands}`"
-            ),
+#                 f"⚙️ **Commands detected:** "
+#                 f"`{total_commands}`"
+#             ),
 
-            color=(
-                discord.Color.green()
-                if failed == 0
-                else discord.Color.orange()
-            )
-        )
+#             color=(
+#                 discord.Color.green()
+#                 if failed == 0
+#                 else discord.Color.orange()
+#             )
+#         )
 
-        summary.set_footer(
-            text=(
-                f"Requested by "
-                f"{interaction.user}"
-            )
-        )
+#         summary.set_footer(
+#             text=(
+#                 f"Requested by "
+#                 f"{interaction.user}"
+#             )
+#         )
 
-        # ====================================================
-        # SEND
-        # ====================================================
+#         # ====================================================
+#         # SEND
+#         # ====================================================
 
-        for embed in embeds:
+#         for embed in embeds:
 
-            await interaction.followup.send(
-                embed=embed,
-                ephemeral=True
-            )
+#             await interaction.followup.send(
+#                 embed=embed,
+#                 ephemeral=True
+#             )
 
-        await interaction.followup.send(
-            embed=summary,
-            ephemeral=True
-        )
+#         await interaction.followup.send(
+#             embed=summary,
+#             ephemeral=True
+#         )
 
-        print(
-            "========================================"
-        )
+#         print(
+#             "========================================"
+#         )
 
-        print(
-            "        MASTER REFRESH COMPLETE"
-        )
+#         print(
+#             "        MASTER REFRESH COMPLETE"
+#         )
 
-        print(
-            "========================================"
-        )
+#         print(
+#             "========================================"
+#         )
 
 
-    # ========================================================
-    # ERROR HANDLER
-    # ========================================================
+#     # ========================================================
+#     # ERROR HANDLER
+#     # ========================================================
 
-    @refresh.error
-    async def refresh_error(
-        self,
-        interaction,
-        error
-    ):
+#     @refresh.error
+#     async def refresh_error(
+#         self,
+#         interaction,
+#         error
+#     ):
 
-        if isinstance(
-            error,
-            app_commands.errors.MissingPermissions
-        ):
+#         if isinstance(
+#             error,
+#             app_commands.errors.MissingPermissions
+#         ):
 
-            message = (
-                "❌ You need **Administrator** "
-                "permission to use `/refresh`."
-            )
+#             message = (
+#                 "❌ You need **Administrator** "
+#                 "permission to use `/refresh`."
+#             )
 
-        else:
+#         else:
 
-            message = (
-                "❌ Refresh error:\n"
-                f"`{type(error).__name__}: {error}`"
-            )
+#             message = (
+#                 "❌ Refresh error:\n"
+#                 f"`{type(error).__name__}: {error}`"
+#             )
 
-            traceback.print_exc()
+#             traceback.print_exc()
 
-        try:
+#         try:
 
-            if interaction.response.is_done():
+#             if interaction.response.is_done():
 
-                await interaction.followup.send(
-                    message,
-                    ephemeral=True
-                )
+#                 await interaction.followup.send(
+#                     message,
+#                     ephemeral=True
+#                 )
 
-            else:
+#             else:
 
-                await interaction.response.send_message(
-                    message,
-                    ephemeral=True
-                )
+#                 await interaction.response.send_message(
+#                     message,
+#                     ephemeral=True
+#                 )
 
-        except Exception:
+#         except Exception:
 
-            pass
+#             pass
 
 
-# ============================================================
-# SETUP
-# ============================================================
+# # ============================================================
+# # SETUP
+# # ============================================================
 
-async def setup(bot):
+# async def setup(bot):
 
-    await bot.add_cog(
-        Refresh(bot)
-    )
+#     await bot.add_cog(
+#         Refresh(bot)
+#     )
 
-    print(
-        "✅ Refresh Cog ready."
-    )
+#     print(
+#         "✅ Refresh Cog ready."
+#     )
