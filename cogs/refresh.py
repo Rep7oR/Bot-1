@@ -1,1255 +1,1255 @@
-# ============================================================
-# REFRESH / CONFIGURATION READER
-# File: cogs/refresh.py
-#
-# Reads the ACTUAL JSON configuration files used by the Cogs.
-#
-# It does NOT use config_manager.py.
-#
-# Example:
-#
-# voice_config.json
-# welcome_config.json
-# youtube_config.json
-# support_config.json
-# etc.
-#
-# /refresh
-# ============================================================
-
-import discord
-from discord.ext import commands
-from discord import app_commands
-
-import os
-import json
-import re
-from pathlib import Path
-from datetime import datetime
-
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-# Where the JSON files are located.
-#
-# Your current Cogs appear to use files like:
-#
-# voice_config.json
-# youtube_config.json
-# welcome_config.json
-#
-# which are normally in the project root.
-#
-CONFIG_ROOT = Path(".")
+# # ============================================================
+# # REFRESH / CONFIGURATION READER
+# # File: cogs/refresh.py
+# #
+# # Reads the ACTUAL JSON configuration files used by the Cogs.
+# #
+# # It does NOT use config_manager.py.
+# #
+# # Example:
+# #
+# # voice_config.json
+# # welcome_config.json
+# # youtube_config.json
+# # support_config.json
+# # etc.
+# #
+# # /refresh
+# # ============================================================
+
+# import discord
+# from discord.ext import commands
+# from discord import app_commands
+
+# import os
+# import json
+# import re
+# from pathlib import Path
+# from datetime import datetime
+
+
+# # ============================================================
+# # CONFIGURATION
+# # ============================================================
+
+# # Where the JSON files are located.
+# #
+# # Your current Cogs appear to use files like:
+# #
+# # voice_config.json
+# # youtube_config.json
+# # welcome_config.json
+# #
+# # which are normally in the project root.
+# #
+# CONFIG_ROOT = Path(".")
 
 
-# Files that should NOT be treated as Cog configuration.
-#
-# Add more here if you have JSON files that are not configs.
-IGNORED_JSON_FILES = {
-    "package.json",
-    "package-lock.json",
-}
+# # Files that should NOT be treated as Cog configuration.
+# #
+# # Add more here if you have JSON files that are not configs.
+# IGNORED_JSON_FILES = {
+#     "package.json",
+#     "package-lock.json",
+# }
 
 
-# Maximum Discord embed description length
-MAX_DESCRIPTION = 4000
+# # Maximum Discord embed description length
+# MAX_DESCRIPTION = 4000
 
 
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
+# # ============================================================
+# # HELPER FUNCTIONS
+# # ============================================================
 
-def is_guild_id(value):
-    """
-    Check whether a string looks like a Discord guild ID.
-    """
+# def is_guild_id(value):
+#     """
+#     Check whether a string looks like a Discord guild ID.
+#     """
 
-    if not isinstance(value, str):
-        return False
+#     if not isinstance(value, str):
+#         return False
 
-    return value.isdigit() and len(value) >= 15
+#     return value.isdigit() and len(value) >= 15
 
 
-# ============================================================
-# FORMAT JSON VALUES
-# ============================================================
+# # ============================================================
+# # FORMAT JSON VALUES
+# # ============================================================
 
-def format_value(
-    value,
-    guild=None,
-    indent=0
-):
-    """
-    Convert JSON values into readable Discord text.
+# def format_value(
+#     value,
+#     guild=None,
+#     indent=0
+# ):
+#     """
+#     Convert JSON values into readable Discord text.
 
-    Also attempts to resolve:
-        channel IDs
-        role IDs
-        category IDs
-        guild IDs
-    """
+#     Also attempts to resolve:
+#         channel IDs
+#         role IDs
+#         category IDs
+#         guild IDs
+#     """
 
-    spacing = " " * indent
+#     spacing = " " * indent
 
-    # --------------------------------------------------------
-    # None
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # None
+#     # --------------------------------------------------------
 
-    if value is None:
-        return "`None`"
+#     if value is None:
+#         return "`None`"
 
-    # --------------------------------------------------------
-    # Boolean
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Boolean
+#     # --------------------------------------------------------
 
-    if isinstance(value, bool):
+#     if isinstance(value, bool):
 
-        return "✅ Enabled" if value else "❌ Disabled"
+#         return "✅ Enabled" if value else "❌ Disabled"
 
-    # --------------------------------------------------------
-    # Number
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Number
+#     # --------------------------------------------------------
 
-    if isinstance(value, (int, float)):
+#     if isinstance(value, (int, float)):
 
-        return f"`{value}`"
+#         return f"`{value}`"
 
-    # --------------------------------------------------------
-    # String
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # String
+#     # --------------------------------------------------------
 
-    if isinstance(value, str):
+#     if isinstance(value, str):
 
-        # --------------------------------------------
-        # Discord ID
-        # --------------------------------------------
+#         # --------------------------------------------
+#         # Discord ID
+#         # --------------------------------------------
 
-        if value.isdigit() and len(value) >= 15:
+#         if value.isdigit() and len(value) >= 15:
 
-            if guild is not None:
+#             if guild is not None:
 
-                try:
+#                 try:
 
-                    discord_id = int(value)
+#                     discord_id = int(value)
 
-                    # Channel
-                    channel = guild.get_channel(
-                        discord_id
-                    )
+#                     # Channel
+#                     channel = guild.get_channel(
+#                         discord_id
+#                     )
 
-                    if channel:
+#                     if channel:
 
-                        return (
-                            f"{channel.mention} "
-                            f"`({channel.name})`"
-                        )
+#                         return (
+#                             f"{channel.mention} "
+#                             f"`({channel.name})`"
+#                         )
 
-                    # Role
-                    role = guild.get_role(
-                        discord_id
-                    )
+#                     # Role
+#                     role = guild.get_role(
+#                         discord_id
+#                     )
 
-                    if role:
+#                     if role:
 
-                        return (
-                            f"{role.mention} "
-                            f"`({role.name})`"
-                        )
+#                         return (
+#                             f"{role.mention} "
+#                             f"`({role.name})`"
+#                         )
 
-                except Exception:
-                    pass
+#                 except Exception:
+#                     pass
 
-            return f"`{value}`"
+#             return f"`{value}`"
 
-        # --------------------------------------------
-        # Regular string
-        # --------------------------------------------
+#         # --------------------------------------------
+#         # Regular string
+#         # --------------------------------------------
 
-        # Prevent extremely large values
-        if len(value) > 1000:
+#         # Prevent extremely large values
+#         if len(value) > 1000:
 
-            value = value[:1000] + "..."
+#             value = value[:1000] + "..."
 
-        return f"`{value}`"
+#         return f"`{value}`"
 
-    # --------------------------------------------------------
-    # List
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # List
+#     # --------------------------------------------------------
 
-    if isinstance(value, list):
+#     if isinstance(value, list):
 
-        if not value:
+#         if not value:
 
-            return "`[]`"
+#             return "`[]`"
 
-        result = []
+#         result = []
 
-        for item in value[:50]:
+#         for item in value[:50]:
 
-            result.append(
+#             result.append(
 
-                format_value(
-                    item,
-                    guild=guild,
-                    indent=indent + 2
-                )
-            )
+#                 format_value(
+#                     item,
+#                     guild=guild,
+#                     indent=indent + 2
+#                 )
+#             )
 
-        if len(value) > 50:
+#         if len(value) > 50:
 
-            result.append(
-                f"`... {len(value) - 50} more items`"
-            )
+#             result.append(
+#                 f"`... {len(value) - 50} more items`"
+#             )
 
-        return "\n".join(
-            f"{spacing}• {item}"
-            for item in result
-        )
+#         return "\n".join(
+#             f"{spacing}• {item}"
+#             for item in result
+#         )
 
-    # --------------------------------------------------------
-    # Dictionary
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Dictionary
+#     # --------------------------------------------------------
 
-    if isinstance(value, dict):
+#     if isinstance(value, dict):
 
-        if not value:
+#         if not value:
 
-            return "`{}`"
+#             return "`{}`"
 
-        result = []
+#         result = []
 
-        for key, item in value.items():
+#         for key, item in value.items():
 
-            # ------------------------------------
-            # Special handling for common IDs
-            # ------------------------------------
+#             # ------------------------------------
+#             # Special handling for common IDs
+#             # ------------------------------------
 
-            readable_key = str(key)
+#             readable_key = str(key)
 
-            key_lower = readable_key.lower()
+#             key_lower = readable_key.lower()
 
-            # Guild ID
-            if (
-                key_lower in {
-                    "guild_id",
-                    "server_id"
-                }
-                and isinstance(item, (int, str))
-            ):
+#             # Guild ID
+#             if (
+#                 key_lower in {
+#                     "guild_id",
+#                     "server_id"
+#                 }
+#                 and isinstance(item, (int, str))
+#             ):
 
-                guild_text = f"`{item}`"
+#                 guild_text = f"`{item}`"
 
-                if guild is not None:
+#                 if guild is not None:
 
-                    try:
+#                     try:
 
-                        if int(item) == guild.id:
+#                         if int(item) == guild.id:
 
-                            guild_text = (
-                                f"{guild.name} "
-                                f"`({guild.id})`"
-                            )
+#                             guild_text = (
+#                                 f"{guild.name} "
+#                                 f"`({guild.id})`"
+#                             )
 
-                    except Exception:
-                        pass
+#                     except Exception:
+#                         pass
 
-                result.append(
-                    f"{spacing}**{readable_key}:** "
-                    f"{guild_text}"
-                )
+#                 result.append(
+#                     f"{spacing}**{readable_key}:** "
+#                     f"{guild_text}"
+#                 )
 
-                continue
+#                 continue
 
-            # ------------------------------------
-            # Regular nested value
-            # ------------------------------------
+#             # ------------------------------------
+#             # Regular nested value
+#             # ------------------------------------
 
-            formatted = format_value(
+#             formatted = format_value(
 
-                item,
+#                 item,
 
-                guild=guild,
+#                 guild=guild,
 
-                indent=indent + 2
-            )
+#                 indent=indent + 2
+#             )
 
-            result.append(
+#             result.append(
 
-                f"{spacing}**{readable_key}:** "
-                f"{formatted}"
-            )
+#                 f"{spacing}**{readable_key}:** "
+#                 f"{formatted}"
+#             )
 
-        return "\n".join(result)
+#         return "\n".join(result)
 
-    # --------------------------------------------------------
-    # Unknown
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Unknown
+#     # --------------------------------------------------------
 
-    return f"`{str(value)}`"
+#     return f"`{str(value)}`"
 
 
-# ============================================================
-# READ JSON FILE
-# ============================================================
+# # ============================================================
+# # READ JSON FILE
+# # ============================================================
 
-def read_json_file(
-    filepath
-):
-    """
-    Safely read a JSON file.
-    """
+# def read_json_file(
+#     filepath
+# ):
+#     """
+#     Safely read a JSON file.
+#     """
 
-    try:
+#     try:
 
-        with open(
-            filepath,
-            "r",
-            encoding="utf-8"
-        ) as file:
+#         with open(
+#             filepath,
+#             "r",
+#             encoding="utf-8"
+#         ) as file:
 
-            return json.load(file), None
+#             return json.load(file), None
 
-    except json.JSONDecodeError as error:
+#     except json.JSONDecodeError as error:
 
-        return None, (
-            f"Invalid JSON: {error}"
-        )
+#         return None, (
+#             f"Invalid JSON: {error}"
+#         )
 
-    except Exception as error:
+#     except Exception as error:
 
-        return None, (
-            f"{type(error).__name__}: {error}"
-        )
+#         return None, (
+#             f"{type(error).__name__}: {error}"
+#         )
 
 
-# ============================================================
-# FIND JSON CONFIGURATION FILES
-# ============================================================
+# # ============================================================
+# # FIND JSON CONFIGURATION FILES
+# # ============================================================
 
-def find_json_files():
+# def find_json_files():
 
-    files = []
+#     files = []
 
-    # --------------------------------------------------------
-    # Search project root
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Search project root
+#     # --------------------------------------------------------
 
-    for filepath in CONFIG_ROOT.glob("*.json"):
+#     for filepath in CONFIG_ROOT.glob("*.json"):
 
-        if filepath.name in IGNORED_JSON_FILES:
-            continue
+#         if filepath.name in IGNORED_JSON_FILES:
+#             continue
 
-        files.append(filepath)
+#         files.append(filepath)
 
-    # --------------------------------------------------------
-    # Also search cogs folder
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Also search cogs folder
+#     # --------------------------------------------------------
 
-    cogs_folder = CONFIG_ROOT / "cogs"
+#     cogs_folder = CONFIG_ROOT / "cogs"
 
-    if cogs_folder.exists():
+#     if cogs_folder.exists():
 
-        for filepath in cogs_folder.glob("*.json"):
+#         for filepath in cogs_folder.glob("*.json"):
 
-            if filepath.name in IGNORED_JSON_FILES:
-                continue
+#             if filepath.name in IGNORED_JSON_FILES:
+#                 continue
 
-            if filepath not in files:
+#             if filepath not in files:
 
-                files.append(filepath)
+#                 files.append(filepath)
 
-    # --------------------------------------------------------
-    # Sort
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Sort
+#     # --------------------------------------------------------
 
-    files.sort(
-        key=lambda path: path.name.lower()
-    )
+#     files.sort(
+#         key=lambda path: path.name.lower()
+#     )
 
-    return files
+#     return files
 
 
-# ============================================================
-# CREATE DISPLAY NAME
-# ============================================================
+# # ============================================================
+# # CREATE DISPLAY NAME
+# # ============================================================
 
-def cog_name_from_file(
-    filename
-):
+# def cog_name_from_file(
+#     filename
+# ):
 
-    name = Path(
-        filename
-    ).stem
+#     name = Path(
+#         filename
+#     ).stem
 
-    # Remove common suffix
-    if name.lower().endswith("_config"):
+#     # Remove common suffix
+#     if name.lower().endswith("_config"):
 
-        name = name[:-7]
+#         name = name[:-7]
 
-    elif name.lower().endswith("config"):
+#     elif name.lower().endswith("config"):
 
-        name = name[:-6]
+#         name = name[:-6]
 
-    # Replace separators
-    name = name.replace(
-        "_",
-        " "
-    )
+#     # Replace separators
+#     name = name.replace(
+#         "_",
+#         " "
+#     )
 
-    name = name.replace(
-        "-",
-        " "
-    )
+#     name = name.replace(
+#         "-",
+#         " "
+#     )
 
-    # Capitalize
-    return name.title()
+#     # Capitalize
+#     return name.title()
 
 
-# ============================================================
-# FIND GUILD CONFIGURATION
-# ============================================================
+# # ============================================================
+# # FIND GUILD CONFIGURATION
+# # ============================================================
 
-def get_guild_data(
-    data,
-    guild_id
-):
-    """
-    Try to find the configuration belonging
-    to the current Discord server.
+# def get_guild_data(
+#     data,
+#     guild_id
+# ):
+#     """
+#     Try to find the configuration belonging
+#     to the current Discord server.
 
-    Supports structures such as:
+#     Supports structures such as:
 
-    {
-        "123456789": {...}
-    }
+#     {
+#         "123456789": {...}
+#     }
 
-    or:
+#     or:
 
-    {
-        "guild_id": 123456789,
-        ...
-    }
+#     {
+#         "guild_id": 123456789,
+#         ...
+#     }
 
-    or:
+#     or:
 
-    {
-        "guilds": {
-            "123456789": {...}
-        }
-    }
-    """
+#     {
+#         "guilds": {
+#             "123456789": {...}
+#         }
+#     }
+#     """
 
-    guild_id = str(guild_id)
+#     guild_id = str(guild_id)
 
-    # --------------------------------------------------------
-    # Not dictionary
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Not dictionary
+#     # --------------------------------------------------------
 
-    if not isinstance(data, dict):
+#     if not isinstance(data, dict):
 
-        return None
+#         return None
 
-    # --------------------------------------------------------
-    # Direct guild key
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Direct guild key
+#     # --------------------------------------------------------
 
-    if guild_id in data:
+#     if guild_id in data:
 
-        return data[guild_id]
+#         return data[guild_id]
 
-    # --------------------------------------------------------
-    # Integer guild key
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Integer guild key
+#     # --------------------------------------------------------
 
-    try:
+#     try:
 
-        integer_guild_id = int(guild_id)
+#         integer_guild_id = int(guild_id)
 
-        if integer_guild_id in data:
+#         if integer_guild_id in data:
 
-            return data[integer_guild_id]
+#             return data[integer_guild_id]
 
-    except Exception:
-        pass
+#     except Exception:
+#         pass
 
-    # --------------------------------------------------------
-    # Search common containers
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Search common containers
+#     # --------------------------------------------------------
 
-    for container_name in (
-        "guilds",
-        "servers",
-        "configurations",
-        "configs",
-        "data"
-    ):
+#     for container_name in (
+#         "guilds",
+#         "servers",
+#         "configurations",
+#         "configs",
+#         "data"
+#     ):
 
-        container = data.get(
-            container_name
-        )
+#         container = data.get(
+#             container_name
+#         )
 
-        if isinstance(
-            container,
-            dict
-        ):
+#         if isinstance(
+#             container,
+#             dict
+#         ):
 
-            if guild_id in container:
+#             if guild_id in container:
 
-                return container[guild_id]
+#                 return container[guild_id]
 
-    # --------------------------------------------------------
-    # Check guild_id inside object
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Check guild_id inside object
+#     # --------------------------------------------------------
 
-    if (
-        str(
-            data.get(
-                "guild_id",
-                ""
-            )
-        ) == guild_id
-    ):
+#     if (
+#         str(
+#             data.get(
+#                 "guild_id",
+#                 ""
+#             )
+#         ) == guild_id
+#     ):
 
-        return data
+#         return data
 
-    # --------------------------------------------------------
-    # Check server_id
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Check server_id
+#     # --------------------------------------------------------
 
-    if (
-        str(
-            data.get(
-                "server_id",
-                ""
-            )
-        ) == guild_id
-    ):
+#     if (
+#         str(
+#             data.get(
+#                 "server_id",
+#                 ""
+#             )
+#         ) == guild_id
+#     ):
 
-        return data
+#         return data
 
-    # --------------------------------------------------------
-    # Nothing found
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Nothing found
+#     # --------------------------------------------------------
 
-    return None
+#     return None
 
 
-# ============================================================
-# DETECT WHETHER JSON HAS GUILD CONFIGURATION
-# ============================================================
+# # ============================================================
+# # DETECT WHETHER JSON HAS GUILD CONFIGURATION
+# # ============================================================
 
-def has_any_configuration(
-    data
-):
+# def has_any_configuration(
+#     data
+# ):
 
-    if data is None:
-        return False
+#     if data is None:
+#         return False
 
-    if isinstance(
-        data,
-        dict
-    ):
+#     if isinstance(
+#         data,
+#         dict
+#     ):
 
-        return len(data) > 0
+#         return len(data) > 0
 
-    if isinstance(
-        data,
-        list
-    ):
+#     if isinstance(
+#         data,
+#         list
+#     ):
 
-        return len(data) > 0
+#         return len(data) > 0
 
-    return True
+#     return True
 
 
-# ============================================================
-# CREATE FILE SUMMARY
-# ============================================================
+# # ============================================================
+# # CREATE FILE SUMMARY
+# # ============================================================
 
-def create_file_summary(
-    filepath,
-    guild
-):
+# def create_file_summary(
+#     filepath,
+#     guild
+# ):
 
-    filename = filepath.name
+#     filename = filepath.name
 
-    cog_name = cog_name_from_file(
-        filename
-    )
+#     cog_name = cog_name_from_file(
+#         filename
+#     )
 
-    data, error = read_json_file(
-        filepath
-    )
+#     data, error = read_json_file(
+#         filepath
+#     )
 
-    # --------------------------------------------------------
-    # Header
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Header
+#     # --------------------------------------------------------
 
-    lines = []
+#     lines = []
 
-    lines.append(
-        f"📦 **{cog_name}**"
-    )
+#     lines.append(
+#         f"📦 **{cog_name}**"
+#     )
 
-    lines.append(
-        f"📄 `{filename}`"
-    )
+#     lines.append(
+#         f"📄 `{filename}`"
+#     )
 
-    # --------------------------------------------------------
-    # Read error
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Read error
+#     # --------------------------------------------------------
 
-    if error:
+#     if error:
 
-        lines.append(
-            f"❌ **Error:** {error}"
-        )
+#         lines.append(
+#             f"❌ **Error:** {error}"
+#         )
 
-        return "\n".join(lines)
+#         return "\n".join(lines)
 
-    # --------------------------------------------------------
-    # Empty file
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Empty file
+#     # --------------------------------------------------------
 
-    if not has_any_configuration(data):
+#     if not has_any_configuration(data):
 
-        lines.append(
-            "⚪ **Configuration file is empty.**"
-        )
+#         lines.append(
+#             "⚪ **Configuration file is empty.**"
+#         )
 
-        return "\n".join(lines)
+#         return "\n".join(lines)
 
-    # --------------------------------------------------------
-    # Find guild configuration
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Find guild configuration
+#     # --------------------------------------------------------
 
-    guild_config = get_guild_data(
+#     guild_config = get_guild_data(
 
-        data,
+#         data,
 
-        guild.id
-    )
+#         guild.id
+#     )
 
-    # --------------------------------------------------------
-    # Guild-specific configuration
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Guild-specific configuration
+#     # --------------------------------------------------------
 
-    if guild_config is not None:
+#     if guild_config is not None:
 
-        lines.append(
-            "🟢 **Guild configuration found.**"
-        )
+#         lines.append(
+#             "🟢 **Guild configuration found.**"
+#         )
 
-        formatted = format_value(
+#         formatted = format_value(
 
-            guild_config,
+#             guild_config,
 
-            guild=guild
-        )
+#             guild=guild
+#         )
 
-        if formatted:
+#         if formatted:
 
-            lines.append(
-                formatted
-            )
+#             lines.append(
+#                 formatted
+#             )
 
-        return "\n".join(lines)
+#         return "\n".join(lines)
 
-    # --------------------------------------------------------
-    # File exists but no guild-specific config
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # File exists but no guild-specific config
+#     # --------------------------------------------------------
 
-    lines.append(
-        "🟡 **Configuration file found, "
-        "but no configuration for this server.**"
-    )
+#     lines.append(
+#         "🟡 **Configuration file found, "
+#         "but no configuration for this server.**"
+#     )
 
-    # --------------------------------------------------------
-    # Show top-level information
-    # --------------------------------------------------------
+#     # --------------------------------------------------------
+#     # Show top-level information
+#     # --------------------------------------------------------
 
-    if isinstance(
-        data,
-        dict
-    ):
+#     if isinstance(
+#         data,
+#         dict
+#     ):
 
-        # If the file contains guild IDs,
-        # show which servers are configured.
-        guild_keys = []
+#         # If the file contains guild IDs,
+#         # show which servers are configured.
+#         guild_keys = []
 
-        for key in data.keys():
+#         for key in data.keys():
 
-            if is_guild_id(
-                str(key)
-            ):
+#             if is_guild_id(
+#                 str(key)
+#             ):
 
-                guild_keys.append(
-                    str(key)
-                )
+#                 guild_keys.append(
+#                     str(key)
+#                 )
 
-        if guild_keys:
+#         if guild_keys:
 
-            lines.append(
-                f"🌐 **Servers configured:** "
-                f"`{len(guild_keys)}`"
-            )
+#             lines.append(
+#                 f"🌐 **Servers configured:** "
+#                 f"`{len(guild_keys)}`"
+#             )
 
-            if str(guild.id) not in guild_keys:
+#             if str(guild.id) not in guild_keys:
 
-                lines.append(
-                    "⚠️ This server is not "
-                    "present in the file."
-                )
+#                 lines.append(
+#                     "⚠️ This server is not "
+#                     "present in the file."
+#                 )
 
-        else:
+#         else:
 
-            # Show global configuration
-            formatted = format_value(
+#             # Show global configuration
+#             formatted = format_value(
 
-                data,
+#                 data,
 
-                guild=guild
-            )
+#                 guild=guild
+#             )
 
-            if formatted:
+#             if formatted:
 
-                lines.append(
-                    "⚙️ **Global configuration:**"
-                )
+#                 lines.append(
+#                     "⚙️ **Global configuration:**"
+#                 )
 
-                lines.append(
-                    formatted
-                )
+#                 lines.append(
+#                     formatted
+#                 )
 
-    return "\n".join(lines)
+#     return "\n".join(lines)
 
 
-# ============================================================
-# REFRESH COG
-# ============================================================
+# # ============================================================
+# # REFRESH COG
+# # ============================================================
 
-class Refresh(commands.Cog):
+# class Refresh(commands.Cog):
 
-    def __init__(
-        self,
-        bot
-    ):
+#     def __init__(
+#         self,
+#         bot
+#     ):
 
-        self.bot = bot
+#         self.bot = bot
 
-        print(
-            "🔄 Refresh configuration system loaded."
-        )
+#         print(
+#             "🔄 Refresh configuration system loaded."
+#         )
 
-    # ========================================================
-    # /REFRESH
-    # ========================================================
+#     # ========================================================
+#     # /REFRESH
+#     # ========================================================
 
-    @app_commands.command(
+#     @app_commands.command(
 
-        name="refresh",
+#         name="refresh",
 
-        description=(
-            "Read and display all saved bot configurations."
-        )
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def refresh(
-        self,
-        interaction: discord.Interaction
-    ):
+#         description=(
+#             "Read and display all saved bot configurations."
+#         )
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def refresh(
+#         self,
+#         interaction: discord.Interaction
+#     ):
 
-        # ----------------------------------------------------
-        # Server only
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Server only
+#         # ----------------------------------------------------
 
-        if interaction.guild is None:
+#         if interaction.guild is None:
 
-            await interaction.response.send_message(
+#             await interaction.response.send_message(
 
-                "❌ This command can only be used "
-                "inside a server.",
+#                 "❌ This command can only be used "
+#                 "inside a server.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        # ----------------------------------------------------
-        # Defer
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Defer
+#         # ----------------------------------------------------
 
-        await interaction.response.defer(
-            ephemeral=True
-        )
+#         await interaction.response.defer(
+#             ephemeral=True
+#         )
 
-        guild = interaction.guild
+#         guild = interaction.guild
 
-        # ----------------------------------------------------
-        # Find JSON files
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Find JSON files
+#         # ----------------------------------------------------
 
-        json_files = find_json_files()
+#         json_files = find_json_files()
 
-        # ----------------------------------------------------
-        # No files
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # No files
+#         # ----------------------------------------------------
 
-        if not json_files:
+#         if not json_files:
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                "📊 **Bot Configuration Refresh**\n\n"
+#                 "📊 **Bot Configuration Refresh**\n\n"
 
-                "❌ No JSON configuration files "
-                "were found.",
+#                 "❌ No JSON configuration files "
+#                 "were found.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        # ----------------------------------------------------
-        # Counters
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Counters
+#         # ----------------------------------------------------
 
-        total_files = len(
-            json_files
-        )
+#         total_files = len(
+#             json_files
+#         )
 
-        configured = 0
-        not_configured = 0
-        errors = 0
+#         configured = 0
+#         not_configured = 0
+#         errors = 0
 
-        # ----------------------------------------------------
-        # Generate summaries
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Generate summaries
+#         # ----------------------------------------------------
 
-        summaries = []
+#         summaries = []
 
-        for filepath in json_files:
+#         for filepath in json_files:
 
-            summary = create_file_summary(
+#             summary = create_file_summary(
 
-                filepath,
+#                 filepath,
 
-                guild
-            )
+#                 guild
+#             )
 
-            summaries.append(
-                summary
-            )
+#             summaries.append(
+#                 summary
+#             )
 
-            # --------------------------------------------
-            # Determine status
-            # --------------------------------------------
+#             # --------------------------------------------
+#             # Determine status
+#             # --------------------------------------------
 
-            if "❌ **Error:**" in summary:
+#             if "❌ **Error:**" in summary:
 
-                errors += 1
+#                 errors += 1
 
-            elif "🟢 **Guild configuration found.**" in summary:
+#             elif "🟢 **Guild configuration found.**" in summary:
 
-                configured += 1
+#                 configured += 1
 
-            else:
+#             else:
 
-                not_configured += 1
+#                 not_configured += 1
 
-        # ----------------------------------------------------
-        # Main summary
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Main summary
+#         # ----------------------------------------------------
 
-        overview = (
+#         overview = (
 
-            "📊 **BOT CONFIGURATION REFRESH**\n\n"
+#             "📊 **BOT CONFIGURATION REFRESH**\n\n"
 
-            f"🏠 **Server:** {guild.name}\n\n"
+#             f"🏠 **Server:** {guild.name}\n\n"
 
-            f"📦 **Configuration files found:** "
-            f"`{total_files}`\n"
+#             f"📦 **Configuration files found:** "
+#             f"`{total_files}`\n"
 
-            f"🟢 **Configured for this server:** "
-            f"`{configured}`\n"
+#             f"🟢 **Configured for this server:** "
+#             f"`{configured}`\n"
 
-            f"🟡 **Not configured for this server:** "
-            f"`{not_configured}`\n"
+#             f"🟡 **Not configured for this server:** "
+#             f"`{not_configured}`\n"
 
-            f"❌ **Errors:** "
-            f"`{errors}`\n\n"
+#             f"❌ **Errors:** "
+#             f"`{errors}`\n\n"
 
-            "━━━━━━━━━━━━━━━━━━━━"
-        )
+#             "━━━━━━━━━━━━━━━━━━━━"
+#         )
 
-        # ----------------------------------------------------
-        # Build chunks
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Build chunks
+#         # ----------------------------------------------------
 
-        messages = []
+#         messages = []
 
-        current = overview
+#         current = overview
 
-        for summary in summaries:
+#         for summary in summaries:
 
-            addition = (
-                "\n\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                + summary
-            )
+#             addition = (
+#                 "\n\n"
+#                 "━━━━━━━━━━━━━━━━━━━━\n\n"
+#                 + summary
+#             )
 
-            # Discord message limit
-            if (
-                len(current)
-                + len(addition)
-                > 3900
-            ):
+#             # Discord message limit
+#             if (
+#                 len(current)
+#                 + len(addition)
+#                 > 3900
+#             ):
 
-                messages.append(
-                    current
-                )
+#                 messages.append(
+#                     current
+#                 )
 
-                current = summary
+#                 current = summary
 
-            else:
+#             else:
 
-                current += addition
+#                 current += addition
 
-        if current:
+#         if current:
 
-            messages.append(
-                current
-            )
+#             messages.append(
+#                 current
+#             )
 
-        # ----------------------------------------------------
-        # Send first page
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Send first page
+#         # ----------------------------------------------------
 
-        for index, content in enumerate(
-            messages
-        ):
+#         for index, content in enumerate(
+#             messages
+#         ):
 
-            embed = discord.Embed(
+#             embed = discord.Embed(
 
-                title=(
-                    "📊 Bot Configuration Refresh"
-                    if index == 0
-                    else
-                    f"📊 Configuration "
-                    f"Page {index + 1}"
-                ),
+#                 title=(
+#                     "📊 Bot Configuration Refresh"
+#                     if index == 0
+#                     else
+#                     f"📊 Configuration "
+#                     f"Page {index + 1}"
+#                 ),
 
-                description=content,
+#                 description=content,
 
-                color=(
-                    discord.Color.green()
-                    if errors == 0
-                    else discord.Color.orange()
-                ),
+#                 color=(
+#                     discord.Color.green()
+#                     if errors == 0
+#                     else discord.Color.orange()
+#                 ),
 
-                timestamp=datetime.utcnow()
-            )
+#                 timestamp=datetime.utcnow()
+#             )
 
-            embed.set_footer(
+#             embed.set_footer(
 
-                text=(
-                    f"Page {index + 1}/{len(messages)}"
-                )
-            )
+#                 text=(
+#                     f"Page {index + 1}/{len(messages)}"
+#                 )
+#             )
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                embed=embed,
+#                 embed=embed,
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-    # ========================================================
-    # /CONFIGFILES
-    # ========================================================
+#     # ========================================================
+#     # /CONFIGFILES
+#     # ========================================================
 
-    @app_commands.command(
+#     @app_commands.command(
 
-        name="configfiles",
+#         name="configfiles",
 
-        description=(
-            "Show all configuration files detected by the bot."
-        )
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def configfiles(
-        self,
-        interaction: discord.Interaction
-    ):
+#         description=(
+#             "Show all configuration files detected by the bot."
+#         )
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def configfiles(
+#         self,
+#         interaction: discord.Interaction
+#     ):
 
-        await interaction.response.defer(
-            ephemeral=True
-        )
+#         await interaction.response.defer(
+#             ephemeral=True
+#         )
 
-        files = find_json_files()
+#         files = find_json_files()
 
-        if not files:
+#         if not files:
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                "❌ No JSON configuration files found.",
+#                 "❌ No JSON configuration files found.",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        text = "\n".join(
+#         text = "\n".join(
 
-            f"📄 `{file.name}`"
+#             f"📄 `{file.name}`"
 
-            for file in files
-        )
+#             for file in files
+#         )
 
-        if len(text) > 3900:
+#         if len(text) > 3900:
 
-            text = text[:3900] + "\n..."
+#             text = text[:3900] + "\n..."
 
-        embed = discord.Embed(
+#         embed = discord.Embed(
 
-            title="📂 Configuration Files",
+#             title="📂 Configuration Files",
 
-            description=text,
+#             description=text,
 
-            color=discord.Color.blurple()
-        )
+#             color=discord.Color.blurple()
+#         )
 
-        embed.set_footer(
+#         embed.set_footer(
 
-            text=f"{len(files)} configuration file(s) detected."
-        )
+#             text=f"{len(files)} configuration file(s) detected."
+#         )
 
-        await interaction.followup.send(
+#         await interaction.followup.send(
 
-            embed=embed,
+#             embed=embed,
 
-            ephemeral=True
-        )
+#             ephemeral=True
+#         )
 
-    # ========================================================
-    # /CONFIGREAD
-    # ========================================================
+#     # ========================================================
+#     # /CONFIGREAD
+#     # ========================================================
 
-    @app_commands.command(
+#     @app_commands.command(
 
-        name="configread",
+#         name="configread",
 
-        description=(
-            "Read one specific JSON configuration file."
-        )
-    )
-    @app_commands.describe(
+#         description=(
+#             "Read one specific JSON configuration file."
+#         )
+#     )
+#     @app_commands.describe(
 
-        filename=(
-            "Example: voice_config.json"
-        )
-    )
-    @app_commands.checks.has_permissions(
-        administrator=True
-    )
-    async def configread(
-        self,
-        interaction: discord.Interaction,
-        filename: str
-    ):
+#         filename=(
+#             "Example: voice_config.json"
+#         )
+#     )
+#     @app_commands.checks.has_permissions(
+#         administrator=True
+#     )
+#     async def configread(
+#         self,
+#         interaction: discord.Interaction,
+#         filename: str
+#     ):
 
-        await interaction.response.defer(
-            ephemeral=True
-        )
+#         await interaction.response.defer(
+#             ephemeral=True
+#         )
 
-        # ----------------------------------------------------
-        # Security:
-        # Prevent directory traversal
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Security:
+#         # Prevent directory traversal
+#         # ----------------------------------------------------
 
-        filename = os.path.basename(
-            filename
-        )
+#         filename = os.path.basename(
+#             filename
+#         )
 
-        filepath = CONFIG_ROOT / filename
+#         filepath = CONFIG_ROOT / filename
 
-        # ----------------------------------------------------
-        # File doesn't exist
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # File doesn't exist
+#         # ----------------------------------------------------
 
-        if not filepath.exists():
+#         if not filepath.exists():
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                f"❌ Configuration file not found:\n"
-                f"`{filename}`",
+#                 f"❌ Configuration file not found:\n"
+#                 f"`{filename}`",
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        # ----------------------------------------------------
-        # Read
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Read
+#         # ----------------------------------------------------
 
-        summary = create_file_summary(
+#         summary = create_file_summary(
 
-            filepath,
+#             filepath,
 
-            interaction.guild
-        )
+#             interaction.guild
+#         )
 
-        # ----------------------------------------------------
-        # Too large
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Too large
+#         # ----------------------------------------------------
 
-        if len(summary) <= 3900:
+#         if len(summary) <= 3900:
 
-            embed = discord.Embed(
+#             embed = discord.Embed(
 
-                title=f"📄 {filename}",
+#                 title=f"📄 {filename}",
 
-                description=summary,
+#                 description=summary,
 
-                color=discord.Color.blurple()
-            )
+#                 color=discord.Color.blurple()
+#             )
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                embed=embed,
+#                 embed=embed,
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-            return
+#             return
 
-        # ----------------------------------------------------
-        # Split
-        # ----------------------------------------------------
+#         # ----------------------------------------------------
+#         # Split
+#         # ----------------------------------------------------
 
-        chunks = []
+#         chunks = []
 
-        while summary:
+#         while summary:
 
-            chunk = summary[:3900]
+#             chunk = summary[:3900]
 
-            # Try to split at newline
-            newline = chunk.rfind(
-                "\n"
-            )
+#             # Try to split at newline
+#             newline = chunk.rfind(
+#                 "\n"
+#             )
 
-            if newline > 1000:
+#             if newline > 1000:
 
-                chunk = chunk[:newline]
+#                 chunk = chunk[:newline]
 
-            chunks.append(
-                chunk
-            )
+#             chunks.append(
+#                 chunk
+#             )
 
-            summary = summary[
-                len(chunk):
-            ]
+#             summary = summary[
+#                 len(chunk):
+#             ]
 
-        for index, chunk in enumerate(
-            chunks
-        ):
+#         for index, chunk in enumerate(
+#             chunks
+#         ):
 
-            embed = discord.Embed(
+#             embed = discord.Embed(
 
-                title=(
-                    f"📄 {filename}"
-                    if index == 0
-                    else
-                    f"📄 {filename} "
-                    f"(Page {index + 1})"
-                ),
+#                 title=(
+#                     f"📄 {filename}"
+#                     if index == 0
+#                     else
+#                     f"📄 {filename} "
+#                     f"(Page {index + 1})"
+#                 ),
 
-                description=chunk,
+#                 description=chunk,
 
-                color=discord.Color.blurple()
-            )
+#                 color=discord.Color.blurple()
+#             )
 
-            await interaction.followup.send(
+#             await interaction.followup.send(
 
-                embed=embed,
+#                 embed=embed,
 
-                ephemeral=True
-            )
+#                 ephemeral=True
+#             )
 
-    # ========================================================
-    # ERROR HANDLER
-    # ========================================================
+#     # ========================================================
+#     # ERROR HANDLER
+#     # ========================================================
 
-    @refresh.error
-    async def refresh_error(
-        self,
-        interaction,
-        error
-    ):
+#     @refresh.error
+#     async def refresh_error(
+#         self,
+#         interaction,
+#         error
+#     ):
 
-        if isinstance(
-            error,
-            app_commands.errors.MissingPermissions
-        ):
+#         if isinstance(
+#             error,
+#             app_commands.errors.MissingPermissions
+#         ):
 
-            message = (
-                "❌ You need **Administrator** "
-                "permission to use `/refresh`."
-            )
+#             message = (
+#                 "❌ You need **Administrator** "
+#                 "permission to use `/refresh`."
+#             )
 
-        else:
+#         else:
 
-            print(
-                f"❌ /refresh error: {error}"
-            )
+#             print(
+#                 f"❌ /refresh error: {error}"
+#             )
 
-            message = (
-                "❌ An error occurred while "
-                "reading the bot configuration."
-            )
+#             message = (
+#                 "❌ An error occurred while "
+#                 "reading the bot configuration."
+#             )
 
-        try:
+#         try:
 
-            if interaction.response.is_done():
+#             if interaction.response.is_done():
 
-                await interaction.followup.send(
+#                 await interaction.followup.send(
 
-                    message,
+#                     message,
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-            else:
+#             else:
 
-                await interaction.response.send_message(
+#                 await interaction.response.send_message(
 
-                    message,
+#                     message,
 
-                    ephemeral=True
-                )
+#                     ephemeral=True
+#                 )
 
-        except Exception:
+#         except Exception:
 
-            pass
+#             pass
 
 
-# ============================================================
-# SETUP
-# ============================================================
+# # ============================================================
+# # SETUP
+# # ============================================================
 
-async def setup(bot):
+# async def setup(bot):
 
-    await bot.add_cog(
-        Refresh(bot)
-    )
+#     await bot.add_cog(
+#         Refresh(bot)
+#     )
 
-    print(
-        "✅ Refresh Cog loaded successfully."
-    )
+#     print(
+#         "✅ Refresh Cog loaded successfully."
+#     )
