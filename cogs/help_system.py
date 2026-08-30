@@ -16,23 +16,13 @@ import string
 CONFIG_FILE = "help_config.json"
 TICKETS_FILE = "help_tickets.json"
 
-
-# =========================================================
-# MODERATOR ROLE NAMES
-# =========================================================
+SUPPORT_COUNTER_PREFIX = "🎫 Support Tickets: "
 
 MODERATOR_ROLE_NAMES = [
     "MODERATOR",
     "Moderators",
     "Mod",
 ]
-
-
-# =========================================================
-# SUPPORT COUNTER NAME
-# =========================================================
-
-SUPPORT_COUNTER_PREFIX = "🎫 Support Tickets: "
 
 
 # =========================================================
@@ -104,6 +94,7 @@ def generate_token(existing_tokens):
 def is_moderator(member: discord.Member):
 
     if member.guild_permissions.administrator:
+
         return True
 
     return any(
@@ -116,25 +107,43 @@ def is_moderator(member: discord.Member):
 # SUPPORT MODAL
 # =========================================================
 
-class SupportModal(discord.ui.Modal, title="🆘 Support Request"):
+class SupportModal(
+    discord.ui.Modal,
+    title="🆘 Support Request"
+):
 
     subject = discord.ui.TextInput(
+
         label="Subject",
-        placeholder="What do you need help with?",
+
+        placeholder=(
+            "What do you need help with?"
+        ),
+
         max_length=100,
+
         required=True
     )
 
     message = discord.ui.TextInput(
+
         label="Describe your problem",
-        placeholder="Please explain your problem in detail...",
+
+        placeholder=(
+            "Please explain your problem in detail..."
+        ),
+
         style=discord.TextStyle.paragraph,
+
         max_length=1000,
+
         required=True
     )
 
     def __init__(self, cog):
+
         super().__init__()
+
         self.cog = cog
 
     async def on_submit(
@@ -143,17 +152,155 @@ class SupportModal(discord.ui.Modal, title="🆘 Support Request"):
     ):
 
         await self.cog.create_support_request(
+
             interaction,
+
             str(self.subject),
+
             str(self.message)
         )
 
 
 # =========================================================
-# SUPPORT REQUEST VIEW
+# SUPPORT SETUP VIEW
 # =========================================================
 
-class TicketView(discord.ui.View):
+class SupportSetupView(
+    discord.ui.View
+):
+
+    def __init__(self, cog):
+
+        super().__init__(
+            timeout=None
+        )
+
+        self.cog = cog
+
+    @discord.ui.button(
+
+        label="Get Support",
+
+        emoji="🆘",
+
+        style=discord.ButtonStyle.primary,
+
+        custom_id="support_open_form"
+    )
+    async def get_support(
+
+        self,
+
+        interaction: discord.Interaction,
+
+        button: discord.ui.Button
+    ):
+
+        guild = interaction.guild
+
+        if guild is None:
+
+            await interaction.response.send_message(
+
+                "❌ This button can only be used "
+                "inside a server.",
+
+                ephemeral=True
+            )
+
+            return
+
+        # ---------------------------------------------
+        # CHECK SUPPORT SYSTEM
+        # ---------------------------------------------
+
+        support_channel = self.cog.get_support_channel(
+            guild
+        )
+
+        if support_channel is None:
+
+            await interaction.response.send_message(
+
+                "❌ The support system has not been "
+                "configured yet.",
+
+                ephemeral=True
+            )
+
+            return
+
+        # ---------------------------------------------
+        # CHECK EXISTING REQUEST
+        # ---------------------------------------------
+
+        for token, ticket in self.cog.tickets.items():
+
+            if (
+                ticket.get("guild_id") == guild.id
+                and ticket.get("user_id") == interaction.user.id
+                and not ticket.get("closed", False)
+            ):
+
+                existing_channel = None
+
+                channel_id = ticket.get(
+                    "channel_id"
+                )
+
+                if channel_id:
+
+                    existing_channel = guild.get_channel(
+                        channel_id
+                    )
+
+                if existing_channel:
+
+                    await interaction.response.send_message(
+
+                        f"❌ You already have an open "
+                        f"support ticket.\n\n"
+                        f"🎫 **Ticket:** `{token}`\n"
+                        f"📂 **Channel:** "
+                        f"{existing_channel.mention}",
+
+                        ephemeral=True
+                    )
+
+                else:
+
+                    await interaction.response.send_message(
+
+                        f"❌ You already have an active "
+                        f"support request.\n\n"
+                        f"🎫 **Ticket:** `{token}`\n\n"
+                        f"Please wait for a moderator "
+                        f"to open it.",
+
+                        ephemeral=True
+                    )
+
+                return
+
+        # ---------------------------------------------
+        # OPEN FORM
+        # ---------------------------------------------
+
+        await interaction.response.send_modal(
+
+            SupportModal(
+                self.cog
+            )
+        )
+
+
+# =========================================================
+# MODERATOR SUPPORT REQUEST VIEW
+# =========================================================
+
+class TicketView(
+    discord.ui.View
+):
 
     def __init__(
         self,
@@ -169,18 +316,25 @@ class TicketView(discord.ui.View):
         self.token = token
 
     # =====================================================
-    # OPEN TICKET BUTTON
+    # OPEN TICKET
     # =====================================================
 
     @discord.ui.button(
+
         label="Open Ticket",
+
         emoji="🎫",
+
         style=discord.ButtonStyle.success,
+
         custom_id="support_open_ticket"
     )
     async def open_ticket(
+
         self,
+
         interaction: discord.Interaction,
+
         button: discord.ui.Button
     ):
 
@@ -189,11 +343,6 @@ class TicketView(discord.ui.View):
             discord.Member
         ):
 
-            await interaction.response.send_message(
-                "❌ This button can only be used inside a server.",
-                ephemeral=True
-            )
-
             return
 
         if not is_moderator(
@@ -201,7 +350,10 @@ class TicketView(discord.ui.View):
         ):
 
             await interaction.response.send_message(
-                "❌ Only moderators can open support tickets.",
+
+                "❌ Only moderators can open "
+                "support tickets.",
+
                 ephemeral=True
             )
 
@@ -214,7 +366,9 @@ class TicketView(discord.ui.View):
         if not ticket:
 
             await interaction.response.send_message(
+
                 "❌ This ticket no longer exists.",
+
                 ephemeral=True
             )
 
@@ -226,7 +380,9 @@ class TicketView(discord.ui.View):
         ):
 
             await interaction.response.send_message(
+
                 "❌ This ticket is already closed.",
+
                 ephemeral=True
             )
 
@@ -245,8 +401,10 @@ class TicketView(discord.ui.View):
             if existing_channel:
 
                 await interaction.response.send_message(
+
                     f"⚠️ This ticket is already open:\n"
                     f"{existing_channel.mention}",
+
                     ephemeral=True
                 )
 
@@ -257,25 +415,35 @@ class TicketView(discord.ui.View):
         )
 
         channel = await self.cog.create_ticket_channel(
+
             interaction.guild,
+
             ticket,
+
             self.token,
+
             interaction.user
         )
 
         if channel is None:
 
             await interaction.followup.send(
-                "❌ I couldn't create the private ticket channel.\n"
-                "Please check that I have **Manage Channels** permission.",
+
+                "❌ I couldn't create the private "
+                "ticket channel.\n\n"
+                "Please check that I have "
+                "**Manage Channels** permission.",
+
                 ephemeral=True
             )
 
             return
 
         await interaction.followup.send(
+
             f"🎫 **Ticket opened successfully.**\n"
             f"📂 {channel.mention}",
+
             ephemeral=True
         )
 
@@ -306,14 +474,21 @@ class PrivateTicketView(
     # =====================================================
 
     @discord.ui.button(
+
         label="Close Ticket",
+
         emoji="🔒",
+
         style=discord.ButtonStyle.danger,
+
         custom_id="support_close_ticket"
     )
     async def close_ticket_button(
+
         self,
+
         interaction: discord.Interaction,
+
         button: discord.ui.Button
     ):
 
@@ -329,7 +504,10 @@ class PrivateTicketView(
         ):
 
             await interaction.response.send_message(
-                "❌ Only moderators can close this ticket.",
+
+                "❌ Only moderators can close "
+                "this ticket.",
+
                 ephemeral=True
             )
 
@@ -342,7 +520,10 @@ class PrivateTicketView(
         if not ticket:
 
             await interaction.response.send_message(
-                "❌ Ticket information could not be found.",
+
+                "❌ Ticket information could "
+                "not be found.",
+
                 ephemeral=True
             )
 
@@ -354,26 +535,33 @@ class PrivateTicketView(
         ):
 
             await interaction.response.send_message(
+
                 "❌ This ticket is already closed.",
+
                 ephemeral=True
             )
 
             return
 
         await interaction.response.send_message(
+
             "🔒 Closing ticket...",
+
             ephemeral=True
         )
 
         await self.cog.close_ticket(
+
             interaction.guild,
+
             self.token,
+
             interaction.user
         )
 
 
 # =========================================================
-# HELP SYSTEM COG
+# HELP SYSTEM
 # =========================================================
 
 class HelpSystem(
@@ -401,16 +589,23 @@ class HelpSystem(
 
     async def cog_load(self):
 
-        # Register persistent views
+        # Persistent support setup button
+        self.bot.add_view(
+            SupportSetupView(
+                self
+            )
+        )
+
+        # Persistent ticket buttons
         for token, ticket in self.tickets.items():
 
             if ticket.get(
                 "closed",
                 False
             ):
+
                 continue
 
-            # Support request button
             support_message_id = ticket.get(
                 "support_message_id"
             )
@@ -418,14 +613,15 @@ class HelpSystem(
             if support_message_id:
 
                 self.bot.add_view(
+
                     TicketView(
                         self,
                         token
                     ),
+
                     message_id=support_message_id
                 )
 
-            # Private ticket button
             channel_id = ticket.get(
                 "channel_id"
             )
@@ -433,13 +629,14 @@ class HelpSystem(
             if channel_id:
 
                 self.bot.add_view(
+
                     PrivateTicketView(
                         self,
                         token
                     )
                 )
 
-        # Restore all counters
+        # Restore counters
         for guild in self.bot.guilds:
 
             try:
@@ -451,8 +648,8 @@ class HelpSystem(
             except Exception as e:
 
                 print(
-                    f"❌ Counter restore error for "
-                    f"{guild.name}: {e}"
+                    f"❌ Counter restore error "
+                    f"for {guild.name}: {e}"
                 )
 
     # =====================================================
@@ -464,6 +661,17 @@ class HelpSystem(
         save_json(
             TICKETS_FILE,
             self.tickets
+        )
+
+    # =====================================================
+    # SAVE CONFIG
+    # =====================================================
+
+    def save_config(self):
+
+        save_json(
+            CONFIG_FILE,
+            self.config
         )
 
     # =====================================================
@@ -495,22 +703,32 @@ class HelpSystem(
     ):
 
         guild_config = self.config.get(
-            str(guild.id)
-        )
 
-        if not guild_config:
-            return None
+            str(guild.id),
+
+            {}
+        )
 
         channel_id = guild_config.get(
             "channel_id"
         )
 
         if not channel_id:
+
             return None
 
-        return guild.get_channel(
+        channel = guild.get_channel(
             channel_id
         )
+
+        if isinstance(
+            channel,
+            discord.TextChannel
+        ):
+
+            return channel
+
+        return None
 
     # =====================================================
     # GET TICKET CATEGORY
@@ -522,29 +740,30 @@ class HelpSystem(
     ):
 
         guild_config = self.config.get(
-            str(guild.id)
-        )
 
-        if not guild_config:
-            return None
+            str(guild.id),
+
+            {}
+        )
 
         category_id = guild_config.get(
             "category_id"
         )
 
         if not category_id:
+
             return None
 
-        channel = guild.get_channel(
+        category = guild.get_channel(
             category_id
         )
 
         if isinstance(
-            channel,
+            category,
             discord.CategoryChannel
         ):
 
-            return channel
+            return category
 
         return None
 
@@ -558,53 +777,32 @@ class HelpSystem(
     ):
 
         guild_config = self.config.get(
-            str(guild.id)
-        )
 
-        if not guild_config:
-            return None
+            str(guild.id),
+
+            {}
+        )
 
         category_id = guild_config.get(
             "counter_category_id"
         )
 
         if not category_id:
+
             return None
 
-        channel = guild.get_channel(
+        category = guild.get_channel(
             category_id
         )
 
         if isinstance(
-            channel,
+            category,
             discord.CategoryChannel
         ):
 
-            return channel
+            return category
 
         return None
-
-    # =====================================================
-    # COUNT OPEN SUPPORT TICKETS
-    # =====================================================
-
-    def count_open_tickets(
-        self,
-        guild: discord.Guild
-    ):
-
-        count = 0
-
-        for ticket in self.tickets.values():
-
-            if (
-                ticket.get("guild_id") == guild.id
-                and not ticket.get("closed", False)
-            ):
-
-                count += 1
-
-        return count
 
     # =====================================================
     # GET COUNTER CHANNEL
@@ -616,7 +814,9 @@ class HelpSystem(
     ):
 
         guild_config = self.config.get(
+
             str(guild.id),
+
             {}
         )
 
@@ -625,6 +825,7 @@ class HelpSystem(
         )
 
         if not channel_id:
+
             return None
 
         channel = guild.get_channel(
@@ -641,7 +842,37 @@ class HelpSystem(
         return None
 
     # =====================================================
-    # UPDATE SUPPORT COUNTER
+    # COUNT OPEN TICKETS
+    # =====================================================
+
+    def count_open_tickets(
+        self,
+        guild: discord.Guild
+    ):
+
+        count = 0
+
+        for ticket in self.tickets.values():
+
+            if (
+
+                ticket.get("guild_id") == guild.id
+
+                and
+
+                not ticket.get(
+                    "closed",
+                    False
+                )
+
+            ):
+
+                count += 1
+
+        return count
+
+    # =====================================================
+    # UPDATE COUNTER
     # =====================================================
 
     async def update_support_counter(
@@ -649,67 +880,60 @@ class HelpSystem(
         guild: discord.Guild
     ):
 
-        guild_config = self.get_guild_config(
+        category = self.get_counter_category(
             guild
         )
 
-        counter_category = self.get_counter_category(
-            guild
-        )
-
-        if counter_category is None:
+        if category is None:
 
             return
 
-        open_tickets = self.count_open_tickets(
+        count = self.count_open_tickets(
             guild
         )
 
-        counter_channel = self.get_counter_channel(
+        counter = self.get_counter_channel(
             guild
         )
 
         # -------------------------------------------------
-        # CREATE COUNTER IF IT DOES NOT EXIST
+        # CREATE COUNTER
         # -------------------------------------------------
 
-        if counter_channel is None:
+        if counter is None:
 
             try:
 
-                counter_channel = await guild.create_voice_channel(
+                counter = await guild.create_voice_channel(
 
                     name=(
                         f"{SUPPORT_COUNTER_PREFIX}"
-                        f"{open_tickets}"
+                        f"{count}"
                     ),
 
-                    category=counter_category,
+                    category=category,
 
                     reason=(
-                        "Create live support ticket counter"
+                        "Create live support "
+                        "ticket counter"
                     )
+                )
+
+                guild_config = self.get_guild_config(
+                    guild
                 )
 
                 guild_config[
                     "counter_channel_id"
-                ] = counter_channel.id
+                ] = counter.id
 
-                save_json(
-                    CONFIG_FILE,
-                    self.config
-                )
-
-                print(
-                    f"✅ Created support counter in "
-                    f"{guild.name}"
-                )
+                self.save_config()
 
             except discord.Forbidden:
 
                 print(
-                    f"❌ Missing permission to create "
-                    f"support counter in {guild.name}"
+                    f"❌ Missing Manage Channels "
+                    f"permission in {guild.name}"
                 )
 
                 return
@@ -717,22 +941,21 @@ class HelpSystem(
             except discord.HTTPException as e:
 
                 print(
-                    f"❌ Failed to create support counter "
-                    f"in {guild.name}: {e}"
+                    f"❌ Counter creation failed: {e}"
                 )
 
                 return
 
         # -------------------------------------------------
-        # MOVE COUNTER IF CATEGORY CHANGED
+        # MAKE SURE COUNTER IS IN CORRECT CATEGORY
         # -------------------------------------------------
 
-        if counter_channel.category_id != counter_category.id:
+        if counter.category_id != category.id:
 
             try:
 
-                await counter_channel.edit(
-                    category=counter_category
+                await counter.edit(
+                    category=category
                 )
 
             except discord.HTTPException:
@@ -740,57 +963,62 @@ class HelpSystem(
                 pass
 
         # -------------------------------------------------
-        # UPDATE NAME
+        # UPDATE COUNTER NAME
         # -------------------------------------------------
 
         new_name = (
             f"{SUPPORT_COUNTER_PREFIX}"
-            f"{open_tickets}"
+            f"{count}"
         )
 
-        if counter_channel.name != new_name:
+        if counter.name != new_name:
 
             try:
 
-                await counter_channel.edit(
+                await counter.edit(
                     name=new_name,
                     reason=(
-                        "Update live support ticket counter"
+                        "Update support "
+                        "ticket counter"
                     )
-                )
-
-            except discord.Forbidden:
-
-                print(
-                    f"❌ Cannot rename support counter "
-                    f"in {guild.name}"
                 )
 
             except discord.HTTPException as e:
 
                 print(
-                    f"❌ Counter update error "
-                    f"in {guild.name}: {e}"
+                    f"❌ Counter update failed: {e}"
                 )
 
     # =====================================================
-    # /SETUPHELP
+    # /SUPPORTSETUP
     # =====================================================
 
     @app_commands.command(
-        name="setuphelp",
-        description="Set the channel where support requests are posted."
+
+        name="supportsetup",
+
+        description=(
+            "Create the permanent support form."
+        )
     )
     @app_commands.describe(
-        channel="The support channel."
+
+        channel=(
+            "The channel where the support form "
+            "will be posted."
+        )
     )
     @app_commands.checks.has_permissions(
         administrator=True
     )
-    async def setuphelp(
+    async def supportsetup(
+
         self,
+
         interaction: discord.Interaction,
+
         channel: discord.TextChannel
+
     ):
 
         guild = interaction.guild
@@ -798,7 +1026,196 @@ class HelpSystem(
         if guild is None:
 
             await interaction.response.send_message(
-                "❌ This command can only be used inside a server.",
+
+                "❌ This command can only be used "
+                "inside a server.",
+
+                ephemeral=True
+            )
+
+            return
+
+        # -------------------------------------------------
+        # SAVE SUPPORT CHANNEL
+        # -------------------------------------------------
+
+        guild_config = self.get_guild_config(
+            guild
+        )
+
+        guild_config[
+            "channel_id"
+        ] = channel.id
+
+        self.save_config()
+
+        # -------------------------------------------------
+        # SUPPORT FORM EMBED
+        # -------------------------------------------------
+
+        embed = discord.Embed(
+
+            title="🆘 Need Support?",
+
+            description=(
+
+                "Need help from our moderation team?\n\n"
+
+                "Click the button below to submit "
+                "a support request.\n\n"
+
+                "You **do not need to use `/support`**.\n"
+                "Simply click **🆘 Get Support** and "
+                "fill in the form.\n\n"
+
+                "Your request will be sent to the "
+                "moderation team."
+            ),
+
+            color=discord.Color.blurple()
+        )
+
+        if guild.icon:
+
+            embed.set_thumbnail(
+                url=guild.icon.url
+            )
+
+        embed.add_field(
+
+            name="📋 How it works",
+
+            value=(
+
+                "1️⃣ Click **🆘 Get Support**\n"
+                "2️⃣ Fill out the support form\n"
+                "3️⃣ Submit your request\n"
+                "4️⃣ Wait for a moderator to assist you"
+
+            ),
+
+            inline=False
+        )
+
+        embed.set_footer(
+
+            text=(
+                f"{guild.name} • Support System"
+            ),
+
+            icon_url=(
+
+                guild.icon.url
+
+                if guild.icon
+
+                else None
+            )
+        )
+
+        # -------------------------------------------------
+        # SEND FORM
+        # -------------------------------------------------
+
+        try:
+
+            message = await channel.send(
+
+                embed=embed,
+
+                view=SupportSetupView(
+                    self
+                )
+            )
+
+        except discord.Forbidden:
+
+            await interaction.response.send_message(
+
+                f"❌ I don't have permission to "
+                f"send messages in {channel.mention}.",
+
+                ephemeral=True
+            )
+
+            return
+
+        except discord.HTTPException as e:
+
+            await interaction.response.send_message(
+
+                f"❌ Discord returned an error:\n"
+                f"`{e}`",
+
+                ephemeral=True
+            )
+
+            return
+
+        # -------------------------------------------------
+        # SAVE FORM MESSAGE
+        # -------------------------------------------------
+
+        guild_config[
+            "support_setup_message_id"
+        ] = message.id
+
+        self.save_config()
+
+        # -------------------------------------------------
+        # CONFIRM
+        # -------------------------------------------------
+
+        await interaction.response.send_message(
+
+            f"✅ **Support form created.**\n\n"
+            f"📨 Channel: {channel.mention}\n"
+            f"🆔 Message ID: `{message.id}`\n\n"
+            f"Members can now click **🆘 Get Support** "
+            f"without using `/support`.",
+
+            ephemeral=True
+        )
+
+    # =====================================================
+    # /SETUPHELP
+    # =====================================================
+
+    @app_commands.command(
+
+        name="setuphelp",
+
+        description=(
+            "Set the channel where support requests "
+            "are posted."
+        )
+    )
+    @app_commands.describe(
+
+        channel="The support request channel."
+    )
+    @app_commands.checks.has_permissions(
+        administrator=True
+    )
+    async def setuphelp(
+
+        self,
+
+        interaction: discord.Interaction,
+
+        channel: discord.TextChannel
+
+    ):
+
+        guild = interaction.guild
+
+        if guild is None:
+
+            await interaction.response.send_message(
+
+                "❌ This command can only be used "
+                "inside a server.",
+
                 ephemeral=True
             )
 
@@ -812,15 +1229,15 @@ class HelpSystem(
             "channel_id"
         ] = channel.id
 
-        save_json(
-            CONFIG_FILE,
-            self.config
-        )
+        self.save_config()
 
         await interaction.response.send_message(
-            f"✅ **Support channel configured.**\n\n"
-            f"📨 Requests will be posted in {channel.mention}\n\n"
-            f"Members can now use `/support`.",
+
+            f"✅ **Support request channel configured.**\n\n"
+            f"📨 {channel.mention}\n\n"
+            f"Use `/supportsetup` to place the "
+            f"member support form there.",
+
             ephemeral=True
         )
 
@@ -829,19 +1246,29 @@ class HelpSystem(
     # =====================================================
 
     @app_commands.command(
+
         name="setuphelpcategory",
-        description="Set the category where private tickets are created."
+
+        description=(
+            "Set the category where private "
+            "support tickets are created."
+        )
     )
     @app_commands.describe(
-        category="Category for private support tickets."
+
+        category="Private ticket category."
     )
     @app_commands.checks.has_permissions(
         administrator=True
     )
     async def setuphelpcategory(
+
         self,
+
         interaction: discord.Interaction,
+
         category: discord.CategoryChannel
+
     ):
 
         guild = interaction.guild
@@ -849,7 +1276,10 @@ class HelpSystem(
         if guild is None:
 
             await interaction.response.send_message(
-                "❌ This command can only be used inside a server.",
+
+                "❌ This command can only be used "
+                "inside a server.",
+
                 ephemeral=True
             )
 
@@ -863,14 +1293,13 @@ class HelpSystem(
             "category_id"
         ] = category.id
 
-        save_json(
-            CONFIG_FILE,
-            self.config
-        )
+        self.save_config()
 
         await interaction.response.send_message(
+
             f"✅ **Private ticket category configured.**\n\n"
             f"📂 **{category.name}**",
+
             ephemeral=True
         )
 
@@ -879,19 +1308,32 @@ class HelpSystem(
     # =====================================================
 
     @app_commands.command(
+
         name="setuphelpcounter",
-        description="Set the category where the live support counter is created."
+
+        description=(
+            "Set the category for the live "
+            "support ticket counter."
+        )
     )
     @app_commands.describe(
-        category="Category where the support counter voice channel will be created."
+
+        category=(
+            "Category where the support counter "
+            "will be created."
+        )
     )
     @app_commands.checks.has_permissions(
         administrator=True
     )
     async def setuphelpcounter(
+
         self,
+
         interaction: discord.Interaction,
+
         category: discord.CategoryChannel
+
     ):
 
         guild = interaction.guild
@@ -899,7 +1341,10 @@ class HelpSystem(
         if guild is None:
 
             await interaction.response.send_message(
-                "❌ This command can only be used inside a server.",
+
+                "❌ This command can only be used "
+                "inside a server.",
+
                 ephemeral=True
             )
 
@@ -913,153 +1358,61 @@ class HelpSystem(
             "counter_category_id"
         ] = category.id
 
-        save_json(
-            CONFIG_FILE,
-            self.config
-        )
+        self.save_config()
 
-        # Create/update counter immediately
         await self.update_support_counter(
             guild
         )
 
-        counter_channel = self.get_counter_channel(
+        counter = self.get_counter_channel(
             guild
         )
 
-        if counter_channel:
+        if counter:
 
             await interaction.response.send_message(
+
                 f"✅ **Support counter configured.**\n\n"
                 f"📂 Category: **{category.name}**\n"
-                f"🎫 Counter: {counter_channel.mention}\n\n"
-                f"The counter will automatically update "
-                f"when support tickets are created and closed.",
+                f"🎫 Counter: {counter.mention}\n\n"
+                f"The counter will automatically "
+                f"update when requests are created "
+                f"and closed.",
+
                 ephemeral=True
             )
 
         else:
 
             await interaction.response.send_message(
-                f"⚠️ The counter category was saved, but I "
-                f"couldn't create the counter channel.\n\n"
-                f"Please make sure I have **Manage Channels** permission.",
+
+                "⚠️ The category was saved, but I "
+                "couldn't create the counter.\n\n"
+                "Make sure I have **Manage Channels** "
+                "permission.",
+
                 ephemeral=True
             )
-
-    # =====================================================
-    # /SUPPORT
-    # =====================================================
-
-    @app_commands.command(
-        name="support",
-        description="Submit a support request to the moderation team."
-    )
-    async def support(
-        self,
-        interaction: discord.Interaction
-    ):
-
-        guild = interaction.guild
-
-        if guild is None:
-
-            await interaction.response.send_message(
-                "❌ This command can only be used inside a server.",
-                ephemeral=True
-            )
-
-            return
-
-        support_channel = self.get_support_channel(
-            guild
-        )
-
-        if support_channel is None:
-
-            await interaction.response.send_message(
-                "❌ The support system has not been configured yet.\n\n"
-                "Please ask an administrator to use `/setuphelp`.",
-                ephemeral=True
-            )
-
-            return
-
-        # -------------------------------------------------
-        # CHECK EXISTING TICKET
-        # -------------------------------------------------
-
-        for token, ticket in self.tickets.items():
-
-            if (
-                ticket.get("guild_id") == guild.id
-                and ticket.get("user_id") == interaction.user.id
-                and not ticket.get("closed", False)
-            ):
-
-                existing_channel = None
-
-                channel_id = ticket.get(
-                    "channel_id"
-                )
-
-                if channel_id:
-
-                    existing_channel = guild.get_channel(
-                        channel_id
-                    )
-
-                if existing_channel:
-
-                    await interaction.response.send_message(
-                        f"❌ You already have an open support ticket.\n\n"
-                        f"🎫 **Ticket:** `{token}`\n"
-                        f"📂 **Channel:** {existing_channel.mention}",
-                        ephemeral=True
-                    )
-
-                    return
-
-                # Request exists but private channel
-                # hasn't been opened yet.
-                await interaction.response.send_message(
-                    f"❌ You already have an active support request.\n\n"
-                    f"🎫 **Ticket:** `{token}`\n\n"
-                    f"Please wait for a moderator to open it.",
-                    ephemeral=True
-                )
-
-                return
-
-        # -------------------------------------------------
-        # SHOW FORM
-        # -------------------------------------------------
-
-        await interaction.response.send_modal(
-            SupportModal(
-                self
-            )
-        )
 
     # =====================================================
     # CREATE SUPPORT REQUEST
     # =====================================================
 
     async def create_support_request(
+
         self,
+
         interaction: discord.Interaction,
+
         subject: str,
+
         message: str
+
     ):
 
         guild = interaction.guild
 
         if guild is None:
-
-            await interaction.response.send_message(
-                "❌ This command can only be used inside a server.",
-                ephemeral=True
-            )
 
             return
 
@@ -1070,27 +1423,45 @@ class HelpSystem(
         if support_channel is None:
 
             await interaction.response.send_message(
-                "❌ The support system has not been configured yet.",
+
+                "❌ The support system has not "
+                "been configured yet.",
+
                 ephemeral=True
             )
 
             return
 
         # -------------------------------------------------
-        # CHECK AGAIN
+        # CHECK DUPLICATE REQUEST
         # -------------------------------------------------
 
         for token, ticket in self.tickets.items():
 
             if (
+
                 ticket.get("guild_id") == guild.id
-                and ticket.get("user_id") == interaction.user.id
-                and not ticket.get("closed", False)
+
+                and
+
+                ticket.get("user_id")
+                == interaction.user.id
+
+                and
+
+                not ticket.get(
+                    "closed",
+                    False
+                )
+
             ):
 
                 await interaction.response.send_message(
-                    f"❌ You already have an active support request.\n"
+
+                    f"❌ You already have an active "
+                    f"support request.\n\n"
                     f"🎫 Ticket: `{token}`",
+
                     ephemeral=True
                 )
 
@@ -1110,42 +1481,53 @@ class HelpSystem(
 
         self.tickets[token] = {
 
-            "guild_id": guild.id,
+            "guild_id":
+                guild.id,
 
-            "user_id": interaction.user.id,
+            "user_id":
+                interaction.user.id,
 
-            "username": str(
-                interaction.user
-            ),
+            "username":
+                str(interaction.user),
 
-            "subject": subject,
+            "subject":
+                subject,
 
-            "message": message,
+            "message":
+                message,
 
-            "created_at": int(
-                discord.utils.utcnow().timestamp()
-            ),
+            "created_at":
+                int(
+                    discord.utils.utcnow().timestamp()
+                ),
 
-            "closed": False,
+            "closed":
+                False,
 
-            "channel_id": None,
+            "channel_id":
+                None,
 
-            "opened_by": None,
+            "opened_by":
+                None,
 
-            "support_message_id": None
+            "support_message_id":
+                None
         }
 
         self.save_tickets()
 
         # -------------------------------------------------
-        # CREATE SUPPORT EMBED
+        # CREATE EMBED
         # -------------------------------------------------
 
         embed = discord.Embed(
+
             title="🆘 New Support Request",
+
             description=(
                 "A member has requested assistance."
             ),
+
             color=discord.Color.orange()
         )
 
@@ -1156,60 +1538,76 @@ class HelpSystem(
             )
 
         embed.add_field(
+
             name="🎫 Ticket",
-            value=f"**{token}**",
+
+            value=f"`{token}`",
+
             inline=True
         )
 
         embed.add_field(
+
             name="👤 Member",
+
             value=(
                 f"{interaction.user.mention}\n"
                 f"`{interaction.user}`"
             ),
+
             inline=True
         )
 
         embed.add_field(
-            name="🏠 Server",
-            value=guild.name,
-            inline=True
-        )
 
-        embed.add_field(
             name="📌 Subject",
+
             value=subject,
+
             inline=False
         )
 
         embed.add_field(
+
             name="💬 Request",
+
             value=message,
+
             inline=False
         )
 
         embed.add_field(
+
             name="📌 Moderator Action",
+
             value=(
-                "Click **🎫 Open Ticket** to create a "
-                "private conversation channel.\n\n"
-                "Only the requesting member and moderation "
-                "team will be able to see the conversation."
+
+                "Click **🎫 Open Ticket** to create "
+                "a private support channel."
+
             ),
+
             inline=False
         )
 
         embed.set_footer(
-            text=f"{guild.name} • Support System",
+
+            text=(
+                f"{guild.name} • Support System"
+            ),
+
             icon_url=(
+
                 guild.icon.url
+
                 if guild.icon
+
                 else None
             )
         )
 
         # -------------------------------------------------
-        # SEND SUPPORT REQUEST
+        # SEND REQUEST
         # -------------------------------------------------
 
         try:
@@ -1219,16 +1617,12 @@ class HelpSystem(
                 embed=embed,
 
                 view=TicketView(
+
                     self,
+
                     token
                 )
             )
-
-            self.tickets[token][
-                "support_message_id"
-            ] = support_message.id
-
-            self.save_tickets()
 
         except discord.Forbidden:
 
@@ -1237,7 +1631,10 @@ class HelpSystem(
             self.save_tickets()
 
             await interaction.response.send_message(
-                "❌ I cannot send messages in the support channel.",
+
+                "❌ I cannot send messages in "
+                "the support channel.",
+
                 ephemeral=True
             )
 
@@ -1250,12 +1647,24 @@ class HelpSystem(
             self.save_tickets()
 
             await interaction.response.send_message(
-                "❌ Discord returned an error while creating "
-                "your support request.",
+
+                "❌ Discord returned an error while "
+                "creating your support request.",
+
                 ephemeral=True
             )
 
             return
+
+        # -------------------------------------------------
+        # SAVE MESSAGE ID
+        # -------------------------------------------------
+
+        self.tickets[token][
+            "support_message_id"
+        ] = support_message.id
+
+        self.save_tickets()
 
         # -------------------------------------------------
         # UPDATE COUNTER
@@ -1266,31 +1675,41 @@ class HelpSystem(
         )
 
         # -------------------------------------------------
-        # MEMBER CONFIRMATION
+        # CONFIRM TO MEMBER
         # -------------------------------------------------
 
         await interaction.response.send_message(
-            f"✅ **Your support request has been submitted.**\n\n"
-            f"🎫 **Ticket:** `{token}`\n"
-            f"📨 Your request has been sent to the moderation team.\n"
-            f"🛡️ A moderator will open a private ticket for you.",
+
+            f"✅ **Support request submitted!**\n\n"
+            f"🎫 Ticket: `{token}`\n"
+            f"📨 Your request has been sent to "
+            f"the moderation team.\n\n"
+            f"Please wait for a moderator to "
+            f"open your private ticket.",
+
             ephemeral=True
         )
 
     # =====================================================
-    # CREATE PRIVATE TICKET CHANNEL
+    # CREATE PRIVATE TICKET
     # =====================================================
 
     async def create_ticket_channel(
+
         self,
+
         guild: discord.Guild,
+
         ticket: dict,
+
         token: str,
+
         moderator: discord.Member
+
     ):
 
         # -------------------------------------------------
-        # GET MEMBER
+        # MEMBER
         # -------------------------------------------------
 
         try:
@@ -1310,7 +1729,7 @@ class HelpSystem(
             return None
 
         # -------------------------------------------------
-        # GET CATEGORY
+        # CATEGORY
         # -------------------------------------------------
 
         category = self.get_ticket_category(
@@ -1334,26 +1753,37 @@ class HelpSystem(
 
             member:
                 discord.PermissionOverwrite(
+
                     view_channel=True,
+
                     send_messages=True,
+
                     read_message_history=True,
+
                     attach_files=True,
+
                     embed_links=True
                 ),
 
             moderator:
                 discord.PermissionOverwrite(
+
                     view_channel=True,
+
                     send_messages=True,
+
                     read_message_history=True,
+
                     manage_messages=True,
+
                     attach_files=True,
+
                     embed_links=True
                 )
         }
 
         # -------------------------------------------------
-        # ALL MODERATOR ROLES
+        # MODERATOR ROLES
         # -------------------------------------------------
 
         for role in guild.roles:
@@ -1361,11 +1791,17 @@ class HelpSystem(
             if role.name in MODERATOR_ROLE_NAMES:
 
                 overwrites[role] = discord.PermissionOverwrite(
+
                     view_channel=True,
+
                     send_messages=True,
+
                     read_message_history=True,
+
                     manage_messages=True,
+
                     attach_files=True,
+
                     embed_links=True
                 )
 
@@ -1373,15 +1809,13 @@ class HelpSystem(
         # CREATE CHANNEL
         # -------------------------------------------------
 
-        channel_name = (
-            f"ticket-{token.lower()}"
-        )
-
         try:
 
             ticket_channel = await guild.create_text_channel(
 
-                name=channel_name,
+                name=(
+                    f"ticket-{token.lower()}"
+                ),
 
                 category=category,
 
@@ -1398,11 +1832,10 @@ class HelpSystem(
                 )
             )
 
-        except discord.Forbidden:
-
-            return None
-
-        except discord.HTTPException:
+        except (
+            discord.Forbidden,
+            discord.HTTPException
+        ):
 
             return None
 
@@ -1410,15 +1843,17 @@ class HelpSystem(
         # SAVE CHANNEL
         # -------------------------------------------------
 
-        ticket["channel_id"] = (
-            ticket_channel.id
-        )
+        ticket[
+            "channel_id"
+        ] = ticket_channel.id
 
-        ticket["opened_by"] = (
-            moderator.id
-        )
+        ticket[
+            "opened_by"
+        ] = moderator.id
 
-        ticket["opened_at"] = int(
+        ticket[
+            "opened_at"
+        ] = int(
             discord.utils.utcnow().timestamp()
         )
 
@@ -1429,14 +1864,20 @@ class HelpSystem(
         # -------------------------------------------------
 
         embed = discord.Embed(
+
             title="🎫 Support Ticket",
+
             description=(
+
                 f"Welcome {member.mention}!\n\n"
-                "A moderator has opened your private "
-                "support ticket.\n\n"
-                "Only you and the moderation team can "
-                "see this channel."
+
+                "A moderator has opened your "
+                "private support ticket.\n\n"
+
+                "Only you and the moderation team "
+                "can see this channel."
             ),
+
             color=discord.Color.blurple()
         )
 
@@ -1447,59 +1888,74 @@ class HelpSystem(
             )
 
         embed.add_field(
+
             name="🎫 Ticket",
+
             value=f"`{token}`",
+
             inline=True
         )
 
         embed.add_field(
+
             name="👤 Member",
+
             value=member.mention,
+
             inline=True
         )
 
         embed.add_field(
+
             name="🛡️ Moderator",
+
             value=moderator.mention,
+
             inline=True
         )
 
         embed.add_field(
+
             name="📌 Subject",
+
             value=ticket.get(
                 "subject",
                 "Support"
             ),
+
             inline=False
         )
 
         embed.add_field(
+
             name="💬 Original Request",
-            value=ticket["message"],
-            inline=False
-        )
 
-        embed.add_field(
-            name="🔒 Privacy",
-            value=(
-                "This is a private support conversation. "
-                "Only the member and moderation team "
-                "can access this channel."
+            value=ticket.get(
+                "message",
+                "No description"
             ),
+
             inline=False
         )
 
         embed.set_footer(
-            text=f"{guild.name} • Private Support",
+
+            text=(
+                f"{guild.name} • Private Support"
+            ),
+
             icon_url=(
+
                 guild.icon.url
+
                 if guild.icon
+
                 else None
             )
         )
 
         # -------------------------------------------------
-        # SEND TICKET HEADER
+        # SEND PRIVATE TICKET
         # -------------------------------------------------
 
         try:
@@ -1507,6 +1963,7 @@ class HelpSystem(
             await ticket_channel.send(
 
                 content=(
+
                     f"{member.mention} "
                     f"{moderator.mention}"
                 ),
@@ -1514,7 +1971,9 @@ class HelpSystem(
                 embed=embed,
 
                 view=PrivateTicketView(
+
                     self,
+
                     token
                 ),
 
@@ -1527,63 +1986,42 @@ class HelpSystem(
 
             try:
 
-                await ticket_channel.delete(
-                    reason="Failed to initialize ticket"
-                )
+                await ticket_channel.delete()
 
             except discord.HTTPException:
 
                 pass
 
-            ticket["channel_id"] = None
+            ticket[
+                "channel_id"
+            ] = None
 
             self.save_tickets()
 
             return None
 
         # -------------------------------------------------
-        # DM MEMBER
+        # MEMBER DM
         # -------------------------------------------------
 
         try:
 
             dm_embed = discord.Embed(
+
                 title="🎫 Your Support Ticket Is Open",
+
                 description=(
+
                     f"A moderator from **{guild.name}** "
-                    "has opened a private support ticket "
-                    "for you.\n\n"
-                    "Please continue the conversation in "
-                    f"{ticket_channel.mention}."
+                    "has opened a private support ticket.\n\n"
+
+                    f"Ticket: `{token}`\n\n"
+
+                    "Please continue the conversation "
+                    f"in {ticket_channel.mention}."
                 ),
+
                 color=discord.Color.green()
-            )
-
-            if guild.icon:
-
-                dm_embed.set_thumbnail(
-                    url=guild.icon.url
-                )
-
-            dm_embed.add_field(
-                name="🎫 Ticket",
-                value=f"`{token}`",
-                inline=True
-            )
-
-            dm_embed.add_field(
-                name="🛡️ Moderator",
-                value=moderator.display_name,
-                inline=True
-            )
-
-            dm_embed.set_footer(
-                text=f"{guild.name} • Support System",
-                icon_url=(
-                    guild.icon.url
-                    if guild.icon
-                    else None
-                )
             )
 
             await member.send(
@@ -1601,10 +2039,15 @@ class HelpSystem(
     # =====================================================
 
     async def close_ticket(
+
         self,
+
         guild: discord.Guild,
+
         token: str,
+
         moderator: discord.Member
+
     ):
 
         ticket = self.tickets.get(
@@ -1612,32 +2055,38 @@ class HelpSystem(
         )
 
         if not ticket:
+
             return
 
         if ticket.get(
             "closed",
             False
         ):
+
             return
 
         # -------------------------------------------------
         # MARK CLOSED
         # -------------------------------------------------
 
-        ticket["closed"] = True
+        ticket[
+            "closed"
+        ] = True
 
-        ticket["closed_by"] = (
-            moderator.id
-        )
+        ticket[
+            "closed_by"
+        ] = moderator.id
 
-        ticket["closed_at"] = int(
+        ticket[
+            "closed_at"
+        ] = int(
             discord.utils.utcnow().timestamp()
         )
 
         self.save_tickets()
 
         # -------------------------------------------------
-        # UPDATE COUNTER IMMEDIATELY
+        # UPDATE COUNTER FIRST
         # -------------------------------------------------
 
         await self.update_support_counter(
@@ -1659,7 +2108,7 @@ class HelpSystem(
             member = None
 
         # -------------------------------------------------
-        # SEND CLOSURE DM
+        # MEMBER DM
         # -------------------------------------------------
 
         if member:
@@ -1667,29 +2116,21 @@ class HelpSystem(
             try:
 
                 embed = discord.Embed(
+
                     title="🔒 Support Ticket Closed",
+
                     description=(
-                        f"Your support ticket **{token}** "
-                        f"in **{guild.name}** has been closed.\n\n"
-                        "If you need help again, use "
-                        "`/support` to create a new support request."
+
+                        f"Your support ticket "
+                        f"`{token}` in **{guild.name}** "
+                        "has been closed.\n\n"
+
+                        "If you need help again, simply "
+                        "click the **🆘 Get Support** button "
+                        "in the support channel."
                     ),
+
                     color=discord.Color.red()
-                )
-
-                if guild.icon:
-
-                    embed.set_thumbnail(
-                        url=guild.icon.url
-                    )
-
-                embed.set_footer(
-                    text=f"{guild.name} • Support System",
-                    icon_url=(
-                        guild.icon.url
-                        if guild.icon
-                        else None
-                    )
                 )
 
                 await member.send(
@@ -1701,17 +2142,17 @@ class HelpSystem(
                 pass
 
         # -------------------------------------------------
-        # DELETE PRIVATE TICKET CHANNEL
+        # DELETE PRIVATE CHANNEL
         # -------------------------------------------------
 
-        ticket_channel_id = ticket.get(
+        channel_id = ticket.get(
             "channel_id"
         )
 
-        if ticket_channel_id:
+        if channel_id:
 
             ticket_channel = guild.get_channel(
-                ticket_channel_id
+                channel_id
             )
 
             if ticket_channel:
@@ -1719,98 +2160,62 @@ class HelpSystem(
                 try:
 
                     await ticket_channel.delete(
+
                         reason=(
+
                             f"Support ticket {token} "
                             f"closed by {moderator}"
                         )
                     )
 
-                    print(
-                        f"🗑️ Deleted private ticket channel "
-                        f"for {token}"
-                    )
+                except (
+                    discord.Forbidden,
+                    discord.HTTPException
+                ):
 
-                except discord.Forbidden:
-
-                    print(
-                        f"❌ Cannot delete ticket channel "
-                        f"for {token}"
-                    )
-
-                except discord.HTTPException as e:
-
-                    print(
-                        f"❌ Error deleting ticket channel "
-                        f"{token}: {e}"
-                    )
+                    pass
 
         # -------------------------------------------------
-        # DELETE ORIGINAL SUPPORT MESSAGE
+        # DELETE SUPPORT REQUEST MESSAGE
         # -------------------------------------------------
 
         support_channel = self.get_support_channel(
             guild
         )
 
-        support_message_id = ticket.get(
+        message_id = ticket.get(
             "support_message_id"
         )
 
         if (
             support_channel
-            and support_message_id
+            and message_id
         ):
 
             try:
 
-                support_message = (
-                    await support_channel.fetch_message(
-                        support_message_id
-                    )
+                message = await support_channel.fetch_message(
+                    message_id
                 )
 
-                await support_message.delete()
+                await message.delete()
 
-                print(
-                    f"🗑️ Deleted support request "
-                    f"{token} from #{support_channel.name}"
-                )
-
-            except discord.NotFound:
+            except (
+                discord.NotFound,
+                discord.Forbidden,
+                discord.HTTPException
+            ):
 
                 pass
-
-            except discord.Forbidden:
-
-                print(
-                    f"❌ Cannot delete support message "
-                    f"for {token}"
-                )
-
-            except discord.HTTPException as e:
-
-                print(
-                    f"❌ Error deleting support message "
-                    f"{token}: {e}"
-                )
-
-        # -------------------------------------------------
-        # SAVE FINAL STATE
-        # -------------------------------------------------
 
         self.save_tickets()
 
         # -------------------------------------------------
-        # UPDATE COUNTER AGAIN
+        # FINAL COUNTER UPDATE
         # -------------------------------------------------
 
         await self.update_support_counter(
             guild
-        )
-
-        print(
-            f"🔒 Ticket {token} completely closed "
-            f"by {moderator}"
         )
 
     # =====================================================
@@ -1818,19 +2223,26 @@ class HelpSystem(
     # =====================================================
 
     @app_commands.command(
+
         name="closehelp",
+
         description="Close a support ticket."
     )
     @app_commands.describe(
-        token="The ticket token."
+
+        token="The support ticket token."
     )
     @app_commands.checks.has_permissions(
         administrator=True
     )
     async def closehelp(
+
         self,
+
         interaction: discord.Interaction,
+
         token: str
+
     ):
 
         token = token.upper()
@@ -1842,7 +2254,9 @@ class HelpSystem(
         if not ticket:
 
             await interaction.response.send_message(
+
                 "❌ Ticket not found.",
+
                 ephemeral=True
             )
 
@@ -1854,20 +2268,27 @@ class HelpSystem(
         ):
 
             await interaction.response.send_message(
+
                 "❌ This ticket is already closed.",
+
                 ephemeral=True
             )
 
             return
 
         await interaction.response.send_message(
+
             f"🔒 Closing ticket `{token}`...",
+
             ephemeral=True
         )
 
         await self.close_ticket(
+
             interaction.guild,
+
             token,
+
             interaction.user
         )
 
@@ -1876,32 +2297,29 @@ class HelpSystem(
     # =====================================================
 
     @app_commands.command(
+
         name="helpstatus",
-        description="Check the support system configuration."
+
+        description=(
+            "Check the support system status."
+        )
     )
     @app_commands.checks.has_permissions(
         administrator=True
     )
     async def helpstatus(
+
         self,
+
         interaction: discord.Interaction
+
     ):
 
         guild = interaction.guild
 
         if guild is None:
 
-            await interaction.response.send_message(
-                "❌ This command can only be used inside a server.",
-                ephemeral=True
-            )
-
             return
-
-        guild_config = self.config.get(
-            str(guild.id),
-            {}
-        )
 
         support_channel = self.get_support_channel(
             guild
@@ -1915,11 +2333,11 @@ class HelpSystem(
             guild
         )
 
-        counter_channel = self.get_counter_channel(
+        counter = self.get_counter_channel(
             guild
         )
 
-        open_tickets = self.count_open_tickets(
+        count = self.count_open_tickets(
             guild
         )
 
@@ -1936,11 +2354,11 @@ class HelpSystem(
             f"🔨 **Counter Category:** "
             f"{counter_category.mention if counter_category else 'Not configured'}\n"
 
-            f"🎫 **Counter Channel:** "
-            f"{counter_channel.mention if counter_channel else 'Not created'}\n"
+            f"🎫 **Counter:** "
+            f"{counter.mention if counter else 'Not created'}\n"
 
-            f"📊 **Open Tickets:** "
-            f"`{open_tickets}`",
+            f"📊 **Active Requests:** "
+            f"`{count}`",
 
             ephemeral=True
         )
@@ -1949,88 +2367,159 @@ class HelpSystem(
     # ERROR HANDLERS
     # =====================================================
 
-    @setuphelp.error
-    async def setuphelp_error(
+    @supportsetup.error
+    async def supportsetup_error(
+
         self,
+
         interaction,
+
         error
     ):
 
         if isinstance(
+
             error,
+
             app_commands.errors.MissingPermissions
+
         ):
 
             await interaction.response.send_message(
-                "❌ You need **Administrator** permission.",
+
+                "❌ You need **Administrator** "
+                "permission.",
+
+                ephemeral=True
+            )
+
+    @setuphelp.error
+    async def setuphelp_error(
+
+        self,
+
+        interaction,
+
+        error
+    ):
+
+        if isinstance(
+
+            error,
+
+            app_commands.errors.MissingPermissions
+
+        ):
+
+            await interaction.response.send_message(
+
+                "❌ You need **Administrator** "
+                "permission.",
+
                 ephemeral=True
             )
 
     @setuphelpcategory.error
     async def setuphelpcategory_error(
+
         self,
+
         interaction,
+
         error
     ):
 
         if isinstance(
+
             error,
+
             app_commands.errors.MissingPermissions
+
         ):
 
             await interaction.response.send_message(
-                "❌ You need **Administrator** permission.",
+
+                "❌ You need **Administrator** "
+                "permission.",
+
                 ephemeral=True
             )
 
     @setuphelpcounter.error
     async def setuphelpcounter_error(
+
         self,
+
         interaction,
+
         error
     ):
 
         if isinstance(
+
             error,
+
             app_commands.errors.MissingPermissions
+
         ):
 
             await interaction.response.send_message(
-                "❌ You need **Administrator** permission.",
+
+                "❌ You need **Administrator** "
+                "permission.",
+
                 ephemeral=True
             )
 
     @closehelp.error
     async def closehelp_error(
+
         self,
+
         interaction,
+
         error
     ):
 
         if isinstance(
+
             error,
+
             app_commands.errors.MissingPermissions
+
         ):
 
             await interaction.response.send_message(
-                "❌ You need **Administrator** permission.",
+
+                "❌ You need **Administrator** "
+                "permission.",
+
                 ephemeral=True
             )
 
     @helpstatus.error
     async def helpstatus_error(
+
         self,
+
         interaction,
+
         error
     ):
 
         if isinstance(
+
             error,
+
             app_commands.errors.MissingPermissions
+
         ):
 
             await interaction.response.send_message(
-                "❌ You need **Administrator** permission.",
+
+                "❌ You need **Administrator** "
+                "permission.",
+
                 ephemeral=True
             )
 
@@ -2045,1505 +2534,3 @@ async def setup(bot):
         HelpSystem(bot)
     )
 
-# import discord
-# from discord.ext import commands
-# from discord import app_commands
-
-# import json
-# import os
-# import random
-# import string
-
-
-# # =========================================================
-# # CONFIGURATION
-# # =========================================================
-
-# CONFIG_FILE = "help_config.json"
-# TICKETS_FILE = "help_tickets.json"
-
-# # =========================================================
-# # ADD YOUR MODERATOR ROLE NAMES HERE
-# # =========================================================
-
-# MODERATOR_ROLE_NAMES = [
-#     "MODERATOR",
-#     "Moderators",
-#     "Mod",
-# ]
-
-
-# # =========================================================
-# # JSON FUNCTIONS
-# # =========================================================
-
-# def load_json(filename):
-
-#     if not os.path.exists(filename):
-#         return {}
-
-#     try:
-
-#         with open(
-#             filename,
-#             "r",
-#             encoding="utf-8"
-#         ) as f:
-
-#             return json.load(f)
-
-#     except (
-#         json.JSONDecodeError,
-#         FileNotFoundError
-#     ):
-
-#         return {}
-
-
-# def save_json(filename, data):
-
-#     with open(
-#         filename,
-#         "w",
-#         encoding="utf-8"
-#     ) as f:
-
-#         json.dump(
-#             data,
-#             f,
-#             indent=4
-#         )
-
-
-# # =========================================================
-# # TOKEN GENERATOR
-# # =========================================================
-
-# def generate_token(existing_tokens):
-
-#     while True:
-
-#         token = "H-" + "".join(
-#             random.choices(
-#                 string.ascii_uppercase + string.digits,
-#                 k=6
-#             )
-#         )
-
-#         if token not in existing_tokens:
-
-#             return token
-
-
-# # =========================================================
-# # MODERATOR CHECK
-# # =========================================================
-
-# def is_moderator(member: discord.Member):
-
-#     # Administrators count as moderators
-#     if member.guild_permissions.administrator:
-
-#         return True
-
-#     return any(
-#         role.name in MODERATOR_ROLE_NAMES
-#         for role in member.roles
-#     )
-
-
-# # =========================================================
-# # SUPPORT REQUEST VIEW
-# # =========================================================
-
-# class TicketView(discord.ui.View):
-
-#     def __init__(
-#         self,
-#         cog,
-#         token
-#     ):
-
-#         super().__init__(
-#             timeout=None
-#         )
-
-#         self.cog = cog
-#         self.token = token
-
-#     # =====================================================
-#     # OPEN TICKET BUTTON
-#     # =====================================================
-
-#     @discord.ui.button(
-#         label="Open Ticket",
-#         emoji="🎫",
-#         style=discord.ButtonStyle.success
-#     )
-#     async def open_ticket(
-#         self,
-#         interaction: discord.Interaction,
-#         button: discord.ui.Button
-#     ):
-
-#         # Must be a server member
-#         if not isinstance(
-#             interaction.user,
-#             discord.Member
-#         ):
-
-#             await interaction.response.send_message(
-#                 "❌ This button can only be used inside a server.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         # Only moderators
-#         if not is_moderator(
-#             interaction.user
-#         ):
-
-#             await interaction.response.send_message(
-#                 "❌ Only moderators can open support tickets.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         # Find ticket
-#         ticket = self.cog.tickets.get(
-#             self.token
-#         )
-
-#         if not ticket:
-
-#             await interaction.response.send_message(
-#                 "❌ This ticket no longer exists.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         # Already closed
-#         if ticket.get(
-#             "closed",
-#             False
-#         ):
-
-#             await interaction.response.send_message(
-#                 "❌ This ticket is already closed.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         # Already opened
-#         existing_channel_id = ticket.get(
-#             "channel_id"
-#         )
-
-#         if existing_channel_id:
-
-#             existing_channel = interaction.guild.get_channel(
-#                 existing_channel_id
-#             )
-
-#             if existing_channel:
-
-#                 await interaction.response.send_message(
-#                     f"⚠️ This ticket is already open:\n"
-#                     f"{existing_channel.mention}",
-#                     ephemeral=True
-#                 )
-
-#                 return
-
-#         # Defer
-#         await interaction.response.defer(
-#             ephemeral=True
-#         )
-
-#         # Create private channel
-#         channel = await self.cog.create_ticket_channel(
-#             interaction.guild,
-#             ticket,
-#             self.token,
-#             interaction.user
-#         )
-
-#         if channel is None:
-
-#             await interaction.followup.send(
-#                 "❌ I couldn't create the private ticket channel.\n"
-#                 "Please check that I have **Manage Channels** permission.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         await interaction.followup.send(
-#             f"🎫 **Ticket opened successfully.**\n"
-#             f"📂 {channel.mention}",
-#             ephemeral=True
-#         )
-
-
-# # =========================================================
-# # PRIVATE TICKET VIEW
-# # =========================================================
-
-# class PrivateTicketView(
-#     discord.ui.View
-# ):
-
-#     def __init__(
-#         self,
-#         cog,
-#         token
-#     ):
-
-#         super().__init__(
-#             timeout=None
-#         )
-
-#         self.cog = cog
-#         self.token = token
-
-#     # =====================================================
-#     # CLOSE TICKET
-#     # =====================================================
-
-#     @discord.ui.button(
-#         label="Close Ticket",
-#         emoji="🔒",
-#         style=discord.ButtonStyle.danger
-#     )
-#     async def close_ticket_button(
-#         self,
-#         interaction: discord.Interaction,
-#         button: discord.ui.Button
-#     ):
-
-#         if not isinstance(
-#             interaction.user,
-#             discord.Member
-#         ):
-
-#             return
-
-#         # Only moderators
-#         if not is_moderator(
-#             interaction.user
-#         ):
-
-#             await interaction.response.send_message(
-#                 "❌ Only moderators can close this ticket.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         ticket = self.cog.tickets.get(
-#             self.token
-#         )
-
-#         if not ticket:
-
-#             await interaction.response.send_message(
-#                 "❌ Ticket information could not be found.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         if ticket.get(
-#             "closed",
-#             False
-#         ):
-
-#             await interaction.response.send_message(
-#                 "❌ This ticket is already closed.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         await interaction.response.send_message(
-#             "🔒 Closing ticket...",
-#             ephemeral=True
-#         )
-
-#         await self.cog.close_ticket(
-#             interaction.guild,
-#             self.token,
-#             interaction.user
-#         )
-
-
-# # =========================================================
-# # HELP SYSTEM COG
-# # =========================================================
-
-# class HelpSystem(
-#     commands.Cog
-# ):
-
-#     def __init__(
-#         self,
-#         bot
-#     ):
-
-#         self.bot = bot
-
-#         self.config = load_json(
-#             CONFIG_FILE
-#         )
-
-#         self.tickets = load_json(
-#             TICKETS_FILE
-#         )
-
-#     # =====================================================
-#     # SAVE TICKETS
-#     # =====================================================
-
-#     def save_tickets(self):
-
-#         save_json(
-#             TICKETS_FILE,
-#             self.tickets
-#         )
-
-#     # =====================================================
-#     # GET SUPPORT CHANNEL
-#     # =====================================================
-
-#     def get_support_channel(
-#         self,
-#         guild: discord.Guild
-#     ):
-
-#         guild_config = self.config.get(
-#             str(guild.id)
-#         )
-
-#         if not guild_config:
-
-#             return None
-
-#         channel_id = guild_config.get(
-#             "channel_id"
-#         )
-
-#         if not channel_id:
-
-#             return None
-
-#         return guild.get_channel(
-#             channel_id
-#         )
-
-#     # =====================================================
-#     # GET TICKET CATEGORY
-#     # =====================================================
-
-#     def get_ticket_category(
-#         self,
-#         guild: discord.Guild
-#     ):
-
-#         guild_config = self.config.get(
-#             str(guild.id)
-#         )
-
-#         if not guild_config:
-
-#             return None
-
-#         category_id = guild_config.get(
-#             "category_id"
-#         )
-
-#         if not category_id:
-
-#             return None
-
-#         return guild.get_channel(
-#             category_id
-#         )
-
-#     # =====================================================
-#     # /SETUPHELP
-#     # =====================================================
-
-#     @app_commands.command(
-#         name="setuphelp",
-#         description="Set the channel where help requests are posted."
-#     )
-#     @app_commands.describe(
-#         channel="The support channel."
-#     )
-#     @app_commands.checks.has_permissions(
-#         administrator=True
-#     )
-#     async def setuphelp(
-#         self,
-#         interaction: discord.Interaction,
-#         channel: discord.TextChannel
-#     ):
-
-#         guild = interaction.guild
-
-#         if guild is None:
-
-#             await interaction.response.send_message(
-#                 "❌ This command can only be used inside a server.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         guild_id = str(
-#             guild.id
-#         )
-
-#         if guild_id not in self.config:
-
-#             self.config[guild_id] = {}
-
-#         self.config[guild_id][
-#             "channel_id"
-#         ] = channel.id
-
-#         save_json(
-#             CONFIG_FILE,
-#             self.config
-#         )
-
-#         await interaction.response.send_message(
-#             f"✅ Support channel configured.\n\n"
-#             f"📨 Requests will be posted in {channel.mention}",
-#             ephemeral=True
-#         )
-
-#     # =====================================================
-#     # /SETUPHELPCATEGORY
-#     # =====================================================
-
-#     @app_commands.command(
-#         name="setuphelpcategory",
-#         description="Set the category where private tickets are created."
-#     )
-#     @app_commands.describe(
-#         category="Category for private support tickets."
-#     )
-#     @app_commands.checks.has_permissions(
-#         administrator=True
-#     )
-#     async def setuphelpcategory(
-#         self,
-#         interaction: discord.Interaction,
-#         category: discord.CategoryChannel
-#     ):
-
-#         guild = interaction.guild
-
-#         if guild is None:
-
-#             await interaction.response.send_message(
-#                 "❌ This command can only be used inside a server.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         guild_id = str(
-#             guild.id
-#         )
-
-#         if guild_id not in self.config:
-
-#             self.config[guild_id] = {}
-
-#         self.config[guild_id][
-#             "category_id"
-#         ] = category.id
-
-#         save_json(
-#             CONFIG_FILE,
-#             self.config
-#         )
-
-#         await interaction.response.send_message(
-#             f"✅ Private ticket category configured.\n\n"
-#             f"📂 **{category.name}**",
-#             ephemeral=True
-#         )
-
-#     # =====================================================
-#     # /HELP
-#     #
-#     # AVAILABLE TO EVERY MEMBER
-#     # =====================================================
-
-#     @app_commands.command(
-#         name="help",
-#         description="Request help from the moderation team."
-#     )
-#     @app_commands.describe(
-#         message="Explain what you need help with."
-#     )
-#     async def help_command(
-#         self,
-#         interaction: discord.Interaction,
-#         message: str
-#     ):
-
-#         guild = interaction.guild
-
-#         if guild is None:
-
-#             await interaction.response.send_message(
-#                 "❌ This command can only be used inside a server.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         support_channel = self.get_support_channel(
-#             guild
-#         )
-
-#         # -------------------------------------------------
-#         # SUPPORT CHANNEL NOT CONFIGURED
-#         # -------------------------------------------------
-
-#         if support_channel is None:
-
-#             await interaction.response.send_message(
-#                 "❌ The support system has not been configured yet.\n\n"
-#                 "Please ask an administrator to use `/setuphelp`.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         # -------------------------------------------------
-#         # CHECK EXISTING TICKET
-#         # -------------------------------------------------
-
-#         for token, ticket in self.tickets.items():
-
-#             if (
-#                 ticket.get("guild_id") == guild.id
-#                 and ticket.get("user_id") == interaction.user.id
-#                 and not ticket.get("closed", False)
-#             ):
-
-#                 existing_channel = None
-
-#                 channel_id = ticket.get(
-#                     "channel_id"
-#                 )
-
-#                 if channel_id:
-
-#                     existing_channel = guild.get_channel(
-#                         channel_id
-#                     )
-
-#                 if existing_channel:
-
-#                     await interaction.response.send_message(
-#                         f"❌ You already have an open support ticket.\n\n"
-#                         f"🎫 **Ticket:** `{token}`\n"
-#                         f"📂 **Channel:** {existing_channel.mention}",
-#                         ephemeral=True
-#                     )
-
-#                     return
-
-#         # -------------------------------------------------
-#         # GENERATE TOKEN
-#         # -------------------------------------------------
-
-#         token = generate_token(
-#             self.tickets.keys()
-#         )
-
-#         # -------------------------------------------------
-#         # SAVE TICKET
-#         # -------------------------------------------------
-
-#         self.tickets[token] = {
-
-#             "guild_id": guild.id,
-
-#             "user_id": interaction.user.id,
-
-#             "username": str(
-#                 interaction.user
-#             ),
-
-#             "message": message,
-
-#             "created_at": int(
-#                 discord.utils.utcnow().timestamp()
-#             ),
-
-#             "closed": False,
-
-#             "channel_id": None,
-
-#             "opened_by": None,
-
-#             "support_message_id": None
-#         }
-
-#         self.save_tickets()
-
-#         # -------------------------------------------------
-#         # CREATE SUPPORT EMBED
-#         # -------------------------------------------------
-
-#         embed = discord.Embed(
-#             title="🆘 New Support Request",
-#             description=(
-#                 "A member has requested assistance."
-#             ),
-#             color=discord.Color.orange()
-#         )
-
-#         if guild.icon:
-
-#             embed.set_thumbnail(
-#                 url=guild.icon.url
-#             )
-
-#         embed.add_field(
-#             name="🎫 Ticket",
-#             value=f"**{token}**",
-#             inline=True
-#         )
-
-#         embed.add_field(
-#             name="👤 Member",
-#             value=(
-#                 f"{interaction.user.mention}\n"
-#                 f"`{interaction.user}`"
-#             ),
-#             inline=True
-#         )
-
-#         embed.add_field(
-#             name="🏠 Server",
-#             value=guild.name,
-#             inline=True
-#         )
-
-#         embed.add_field(
-#             name="💬 Request",
-#             value=message,
-#             inline=False
-#         )
-
-#         embed.add_field(
-#             name="📌 Moderator Action",
-#             value=(
-#                 "Click **🎫 Open Ticket** to create a "
-#                 "private conversation channel.\n\n"
-#                 "Only the requesting member and moderation "
-#                 "team will be able to see the conversation."
-#             ),
-#             inline=False
-#         )
-
-#         embed.set_footer(
-#             text=f"{guild.name} • Support System",
-#             icon_url=(
-#                 guild.icon.url
-#                 if guild.icon
-#                 else None
-#             )
-#         )
-
-#         # -------------------------------------------------
-#         # SEND SUPPORT REQUEST
-#         # -------------------------------------------------
-
-#         try:
-
-#             support_message = await support_channel.send(
-#                 embed=embed,
-#                 view=TicketView(
-#                     self,
-#                     token
-#                 )
-#             )
-
-#             # Save support message ID
-#             self.tickets[token][
-#                 "support_message_id"
-#             ] = support_message.id
-
-#             self.save_tickets()
-
-#         except discord.Forbidden:
-
-#             del self.tickets[token]
-
-#             self.save_tickets()
-
-#             await interaction.response.send_message(
-#                 "❌ I cannot send messages in the support channel.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         except discord.HTTPException:
-
-#             del self.tickets[token]
-
-#             self.save_tickets()
-
-#             await interaction.response.send_message(
-#                 "❌ Discord returned an error while creating "
-#                 "your support request.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         # -------------------------------------------------
-#         # MEMBER CONFIRMATION
-#         # -------------------------------------------------
-
-#         await interaction.response.send_message(
-#             f"✅ **Your support request has been submitted.**\n\n"
-#             f"🎫 **Ticket:** `{token}`\n"
-#             f"🛡️ A moderator will open a private ticket "
-#             f"for you.",
-#             ephemeral=True
-#         )
-
-#     # =====================================================
-#     # CREATE PRIVATE TICKET CHANNEL
-#     # =====================================================
-
-#     async def create_ticket_channel(
-#         self,
-#         guild: discord.Guild,
-#         ticket: dict,
-#         token: str,
-#         moderator: discord.Member
-#     ):
-
-#         # -------------------------------------------------
-#         # GET MEMBER
-#         # -------------------------------------------------
-
-#         try:
-
-#             member = guild.get_member(
-#                 ticket["user_id"]
-#             )
-
-#             if member is None:
-
-#                 member = await guild.fetch_member(
-#                     ticket["user_id"]
-#                 )
-
-#         except discord.HTTPException:
-
-#             return None
-
-#         # -------------------------------------------------
-#         # GET CATEGORY
-#         # -------------------------------------------------
-
-#         category = self.get_ticket_category(
-#             guild
-#         )
-
-#         # -------------------------------------------------
-#         # PERMISSIONS
-#         # -------------------------------------------------
-
-#         overwrites = {
-
-#             # Everyone cannot see
-#             guild.default_role: discord.PermissionOverwrite(
-#                 view_channel=False
-#             ),
-
-#             # Member
-#             member: discord.PermissionOverwrite(
-#                 view_channel=True,
-#                 send_messages=True,
-#                 read_message_history=True,
-#                 attach_files=True,
-#                 embed_links=True
-#             ),
-
-#             # Moderator who opened it
-#             moderator: discord.PermissionOverwrite(
-#                 view_channel=True,
-#                 send_messages=True,
-#                 read_message_history=True,
-#                 manage_messages=True,
-#                 attach_files=True,
-#                 embed_links=True
-#             )
-#         }
-
-#         # -------------------------------------------------
-#         # ALL MODERATOR ROLES
-#         # -------------------------------------------------
-
-#         for role in guild.roles:
-
-#             if role.name in MODERATOR_ROLE_NAMES:
-
-#                 overwrites[role] = discord.PermissionOverwrite(
-#                     view_channel=True,
-#                     send_messages=True,
-#                     read_message_history=True,
-#                     manage_messages=True,
-#                     attach_files=True,
-#                     embed_links=True
-#                 )
-
-#         # -------------------------------------------------
-#         # CREATE CHANNEL
-#         # -------------------------------------------------
-
-#         channel_name = (
-#             f"ticket-{token.lower()}"
-#         )
-
-#         try:
-
-#             ticket_channel = await guild.create_text_channel(
-
-#                 name=channel_name,
-
-#                 category=category,
-
-#                 overwrites=overwrites,
-
-#                 topic=(
-#                     f"Support Ticket {token} | "
-#                     f"Member: {member} ({member.id})"
-#                 ),
-
-#                 reason=(
-#                     f"Support ticket {token} "
-#                     f"opened by {moderator}"
-#                 )
-#             )
-
-#         except discord.Forbidden:
-
-#             return None
-
-#         except discord.HTTPException:
-
-#             return None
-
-#         # -------------------------------------------------
-#         # SAVE CHANNEL
-#         # -------------------------------------------------
-
-#         ticket["channel_id"] = (
-#             ticket_channel.id
-#         )
-
-#         ticket["opened_by"] = (
-#             moderator.id
-#         )
-
-#         ticket["opened_at"] = int(
-#             discord.utils.utcnow().timestamp()
-#         )
-
-#         self.save_tickets()
-
-#         # -------------------------------------------------
-#         # TICKET EMBED
-#         # -------------------------------------------------
-
-#         embed = discord.Embed(
-#             title="🎫 Support Ticket",
-#             description=(
-#                 f"Welcome {member.mention}!\n\n"
-#                 "A moderator has opened your private "
-#                 "support ticket.\n\n"
-#                 "Only you and the moderation team can "
-#                 "see this channel."
-#             ),
-#             color=discord.Color.blurple()
-#         )
-
-#         if guild.icon:
-
-#             embed.set_thumbnail(
-#                 url=guild.icon.url
-#             )
-
-#         embed.add_field(
-#             name="🎫 Ticket",
-#             value=f"`{token}`",
-#             inline=True
-#         )
-
-#         embed.add_field(
-#             name="👤 Member",
-#             value=member.mention,
-#             inline=True
-#         )
-
-#         embed.add_field(
-#             name="🛡️ Moderator",
-#             value=moderator.mention,
-#             inline=True
-#         )
-
-#         embed.add_field(
-#             name="💬 Original Request",
-#             value=ticket["message"],
-#             inline=False
-#         )
-
-#         embed.add_field(
-#             name="🔒 Privacy",
-#             value=(
-#                 "This is a private support conversation. "
-#                 "Only the member and moderation team "
-#                 "can access this channel."
-#             ),
-#             inline=False
-#         )
-
-#         embed.set_footer(
-#             text=f"{guild.name} • Private Support",
-#             icon_url=(
-#                 guild.icon.url
-#                 if guild.icon
-#                 else None
-#             )
-#         )
-
-#         # -------------------------------------------------
-#         # SEND TICKET HEADER
-#         # -------------------------------------------------
-
-#         try:
-
-#             await ticket_channel.send(
-
-#                 content=(
-#                     f"{member.mention} "
-#                     f"{moderator.mention}"
-#                 ),
-
-#                 embed=embed,
-
-#                 view=PrivateTicketView(
-#                     self,
-#                     token
-#                 ),
-
-#                 allowed_mentions=discord.AllowedMentions(
-#                     users=True
-#                 )
-#             )
-
-#         except discord.HTTPException:
-
-#             try:
-
-#                 await ticket_channel.delete(
-#                     reason="Failed to initialize ticket"
-#                 )
-
-#             except discord.HTTPException:
-
-#                 pass
-
-#             ticket["channel_id"] = None
-
-#             self.save_tickets()
-
-#             return None
-
-#         # -------------------------------------------------
-#         # DM MEMBER
-#         # -------------------------------------------------
-
-#         try:
-
-#             dm_embed = discord.Embed(
-#                 title="🎫 Your Support Ticket Is Open",
-#                 description=(
-#                     f"A moderator from **{guild.name}** "
-#                     "has opened a private support ticket "
-#                     "for you.\n\n"
-#                     "Please continue the conversation in "
-#                     f"{ticket_channel.mention}."
-#                 ),
-#                 color=discord.Color.green()
-#             )
-
-#             if guild.icon:
-
-#                 dm_embed.set_thumbnail(
-#                     url=guild.icon.url
-#                 )
-
-#             dm_embed.add_field(
-#                 name="🎫 Ticket",
-#                 value=f"`{token}`",
-#                 inline=True
-#             )
-
-#             dm_embed.add_field(
-#                 name="🛡️ Moderator",
-#                 value=moderator.display_name,
-#                 inline=True
-#             )
-
-#             dm_embed.set_footer(
-#                 text=f"{guild.name} • Support System",
-#                 icon_url=(
-#                     guild.icon.url
-#                     if guild.icon
-#                     else None
-#                 )
-#             )
-
-#             await member.send(
-#                 embed=dm_embed
-#             )
-
-#         except discord.HTTPException:
-
-#             pass
-
-#         return ticket_channel
-
-#     # =====================================================
-#     # CLOSE TICKET
-#     # =====================================================
-
-#     async def close_ticket(
-#         self,
-#         guild: discord.Guild,
-#         token: str,
-#         moderator: discord.Member
-#     ):
-
-#         ticket = self.tickets.get(
-#             token
-#         )
-
-#         if not ticket:
-
-#             return
-
-#         if ticket.get(
-#             "closed",
-#             False
-#         ):
-
-#             return
-
-#         # -------------------------------------------------
-#         # MARK CLOSED
-#         # -------------------------------------------------
-
-#         ticket["closed"] = True
-
-#         ticket["closed_by"] = (
-#             moderator.id
-#         )
-
-#         ticket["closed_at"] = int(
-#             discord.utils.utcnow().timestamp()
-#         )
-
-#         self.save_tickets()
-
-#         # =================================================
-#         # GET MEMBER
-#         # =================================================
-
-#         try:
-
-#             member = await self.bot.fetch_user(
-#                 ticket["user_id"]
-#             )
-
-#         except discord.HTTPException:
-
-#             member = None
-
-#         # =================================================
-#         # SEND CLOSURE DM
-#         # =================================================
-
-#         if member:
-
-#             try:
-
-#                 embed = discord.Embed(
-#                     title="🔒 Support Ticket Closed",
-#                     description=(
-#                         f"Your support ticket **{token}** "
-#                         f"in **{guild.name}** has been closed.\n\n"
-#                         "If you need help again, use "
-#                         "`/help` to create a new support request."
-#                     ),
-#                     color=discord.Color.red()
-#                 )
-
-#                 if guild.icon:
-
-#                     embed.set_thumbnail(
-#                         url=guild.icon.url
-#                     )
-
-#                 embed.set_footer(
-#                     text=f"{guild.name} • Support System",
-#                     icon_url=(
-#                         guild.icon.url
-#                         if guild.icon
-#                         else None
-#                     )
-#                 )
-
-#                 await member.send(
-#                     embed=embed
-#                 )
-
-#             except discord.HTTPException:
-
-#                 pass
-
-#         # =================================================
-#         # DELETE PRIVATE TICKET CHANNEL
-#         # =================================================
-
-#         ticket_channel_id = ticket.get(
-#             "channel_id"
-#         )
-
-#         if ticket_channel_id:
-
-#             ticket_channel = guild.get_channel(
-#                 ticket_channel_id
-#             )
-
-#             if ticket_channel:
-
-#                 try:
-
-#                     await ticket_channel.delete(
-#                         reason=(
-#                             f"Support ticket {token} "
-#                             f"closed by {moderator}"
-#                         )
-#                     )
-
-#                     print(
-#                         f"🗑️ Deleted private ticket channel "
-#                         f"for {token}"
-#                     )
-
-#                 except discord.Forbidden:
-
-#                     print(
-#                         f"❌ Cannot delete ticket channel "
-#                         f"for {token}"
-#                     )
-
-#                 except discord.HTTPException as e:
-
-#                     print(
-#                         f"❌ Error deleting ticket channel "
-#                         f"{token}: {e}"
-#                     )
-
-#         # =================================================
-#         # DELETE ORIGINAL SUPPORT MESSAGE
-#         # =================================================
-
-#         support_channel = self.get_support_channel(
-#             guild
-#         )
-
-#         support_message_id = ticket.get(
-#             "support_message_id"
-#         )
-
-#         if (
-#             support_channel
-#             and support_message_id
-#         ):
-
-#             try:
-
-#                 support_message = (
-#                     await support_channel.fetch_message(
-#                         support_message_id
-#                     )
-#                 )
-
-#                 await support_message.delete()
-
-#                 print(
-#                     f"🗑️ Deleted support request "
-#                     f"{token} from #{support_channel.name}"
-#                 )
-
-#             except discord.NotFound:
-
-#                 # Already deleted
-#                 pass
-
-#             except discord.Forbidden:
-
-#                 print(
-#                     f"❌ Cannot delete support message "
-#                     f"for {token}"
-#                 )
-
-#             except discord.HTTPException as e:
-
-#                 print(
-#                     f"❌ Error deleting support message "
-#                     f"{token}: {e}"
-#                 )
-
-#         # =================================================
-#         # SAVE FINAL STATE
-#         # =================================================
-
-#         self.save_tickets()
-
-#         print(
-#             f"🔒 Ticket {token} completely closed "
-#             f"by {moderator}"
-#         )
-
-#     # =====================================================
-#     # /CLOSEHELP
-#     # =====================================================
-
-#     @app_commands.command(
-#         name="closehelp",
-#         description="Close a support ticket."
-#     )
-#     @app_commands.describe(
-#         token="The ticket token."
-#     )
-#     @app_commands.checks.has_permissions(
-#         administrator=True
-#     )
-#     async def closehelp(
-#         self,
-#         interaction: discord.Interaction,
-#         token: str
-#     ):
-
-#         token = token.upper()
-
-#         ticket = self.tickets.get(
-#             token
-#         )
-
-#         if not ticket:
-
-#             await interaction.response.send_message(
-#                 "❌ Ticket not found.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         if ticket.get(
-#             "closed",
-#             False
-#         ):
-
-#             await interaction.response.send_message(
-#                 "❌ This ticket is already closed.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         await interaction.response.send_message(
-#             f"🔒 Closing ticket `{token}`...",
-#             ephemeral=True
-#         )
-
-#         await self.close_ticket(
-#             interaction.guild,
-#             token,
-#             interaction.user
-#         )
-
-#     # =====================================================
-#     # /HELPSTATUS
-#     # =====================================================
-
-#     @app_commands.command(
-#         name="helpstatus",
-#         description="Check the support system configuration."
-#     )
-#     @app_commands.checks.has_permissions(
-#         administrator=True
-#     )
-#     async def helpstatus(
-#         self,
-#         interaction: discord.Interaction
-#     ):
-
-#         guild = interaction.guild
-
-#         if guild is None:
-
-#             await interaction.response.send_message(
-#                 "❌ This command can only be used inside a server.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         guild_config = self.config.get(
-#             str(guild.id),
-#             {}
-#         )
-
-#         support_channel = self.get_support_channel(
-#             guild
-#         )
-
-#         category = self.get_ticket_category(
-#             guild
-#         )
-
-#         # Count open tickets
-#         open_tickets = 0
-
-#         for ticket in self.tickets.values():
-
-#             if (
-#                 ticket.get("guild_id") == guild.id
-#                 and not ticket.get("closed", False)
-#             ):
-
-#                 open_tickets += 1
-
-#         await interaction.response.send_message(
-
-#             f"### 🆘 Support System\n\n"
-
-#             f"📨 **Support Channel:** "
-#             f"{support_channel.mention if support_channel else 'Not configured'}\n"
-
-#             f"📂 **Ticket Category:** "
-#             f"{category.mention if category else 'Not configured'}\n"
-
-#             f"🎫 **Open Tickets:** "
-#             f"`{open_tickets}`",
-
-#             ephemeral=True
-#         )
-
-#     # =====================================================
-#     # ERROR HANDLERS
-#     # =====================================================
-
-#     @setuphelp.error
-#     async def setuphelp_error(
-#         self,
-#         interaction,
-#         error
-#     ):
-
-#         if isinstance(
-#             error,
-#             app_commands.errors.MissingPermissions
-#         ):
-
-#             await interaction.response.send_message(
-#                 "❌ You need **Administrator** permission.",
-#                 ephemeral=True
-#             )
-
-#     @setuphelpcategory.error
-#     async def setuphelpcategory_error(
-#         self,
-#         interaction,
-#         error
-#     ):
-
-#         if isinstance(
-#             error,
-#             app_commands.errors.MissingPermissions
-#         ):
-
-#             await interaction.response.send_message(
-#                 "❌ You need **Administrator** permission.",
-#                 ephemeral=True
-#             )
-
-#     @closehelp.error
-#     async def closehelp_error(
-#         self,
-#         interaction,
-#         error
-#     ):
-
-#         if isinstance(
-#             error,
-#             app_commands.errors.MissingPermissions
-#         ):
-
-#             await interaction.response.send_message(
-#                 "❌ You need **Administrator** permission.",
-#                 ephemeral=True
-#             )
-
-#     @helpstatus.error
-#     async def helpstatus_error(
-#         self,
-#         interaction,
-#         error
-#     ):
-
-
-#         if isinstance(
-#             error,
-#             app_commands.errors.MissingPermissions
-#         ):
-
-#             await interaction.response.send_message(
-#                 "❌ You need **Administrator** permission.",
-#                 ephemeral=True
-#             )
-
-
-# # =========================================================
-# # COG SETUP
-# # =========================================================
-
-# async def setup(bot):
-
-#     await bot.add_cog(
-#         HelpSystem(bot)
-#     )
