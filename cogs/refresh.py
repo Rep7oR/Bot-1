@@ -1,951 +1,1255 @@
-# import discord
-# from discord.ext import commands
-# from discord import app_commands
+# ============================================================
+# REFRESH / CONFIGURATION READER
+# File: cogs/refresh.py
+#
+# Reads the ACTUAL JSON configuration files used by the Cogs.
+#
+# It does NOT use config_manager.py.
+#
+# Example:
+#
+# voice_config.json
+# welcome_config.json
+# youtube_config.json
+# support_config.json
+# etc.
+#
+# /refresh
+# ============================================================
+
+import discord
+from discord.ext import commands
+from discord import app_commands
+
+import os
+import json
+import re
+from pathlib import Path
+from datetime import datetime
+
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+# Where the JSON files are located.
+#
+# Your current Cogs appear to use files like:
+#
+# voice_config.json
+# youtube_config.json
+# welcome_config.json
+#
+# which are normally in the project root.
+#
+CONFIG_ROOT = Path(".")
 
-# import traceback
 
-# from config_manager import config_manager
+# Files that should NOT be treated as Cog configuration.
+#
+# Add more here if you have JSON files that are not configs.
+IGNORED_JSON_FILES = {
+    "package.json",
+    "package-lock.json",
+}
 
 
-# # ============================================================
-# # REFRESH SYSTEM
-# # ============================================================
+# Maximum Discord embed description length
+MAX_DESCRIPTION = 4000
 
-# class Refresh(commands.Cog):
 
-#     def __init__(
-#         self,
-#         bot
-#     ):
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
 
-#         self.bot = bot
+def is_guild_id(value):
+    """
+    Check whether a string looks like a Discord guild ID.
+    """
 
-#         print(
-#             "🔄 Refresh System loaded."
-#         )
+    if not isinstance(value, str):
+        return False
 
-#     # ========================================================
-#     # GET CHANNEL
-#     # ========================================================
+    return value.isdigit() and len(value) >= 15
 
-#     def get_channel(
-#         self,
-#         guild,
-#         channel_id
-#     ):
 
-#         if not channel_id:
+# ============================================================
+# FORMAT JSON VALUES
+# ============================================================
 
-#             return None
+def format_value(
+    value,
+    guild=None,
+    indent=0
+):
+    """
+    Convert JSON values into readable Discord text.
 
-#         try:
+    Also attempts to resolve:
+        channel IDs
+        role IDs
+        category IDs
+        guild IDs
+    """
 
-#             return guild.get_channel(
-#                 int(channel_id)
-#             )
+    spacing = " " * indent
 
-#         except Exception:
+    # --------------------------------------------------------
+    # None
+    # --------------------------------------------------------
 
-#             return None
+    if value is None:
+        return "`None`"
 
-#     # ========================================================
-#     # GET ROLE
-#     # ========================================================
+    # --------------------------------------------------------
+    # Boolean
+    # --------------------------------------------------------
 
-#     def get_role(
-#         self,
-#         guild,
-#         role_id
-#     ):
+    if isinstance(value, bool):
 
-#         if not role_id:
+        return "✅ Enabled" if value else "❌ Disabled"
 
-#             return None
+    # --------------------------------------------------------
+    # Number
+    # --------------------------------------------------------
 
-#         try:
+    if isinstance(value, (int, float)):
 
-#             return guild.get_role(
-#                 int(role_id)
-#             )
+        return f"`{value}`"
 
-#         except Exception:
+    # --------------------------------------------------------
+    # String
+    # --------------------------------------------------------
 
-#             return None
+    if isinstance(value, str):
 
-#     # ========================================================
-#     # FORMAT CONFIGURATION
-#     # ========================================================
+        # --------------------------------------------
+        # Discord ID
+        # --------------------------------------------
 
-#     def format_config(
-#         self,
-#         guild,
-#         config,
-#         indent=0
-#     ):
+        if value.isdigit() and len(value) >= 15:
 
-#         lines = []
+            if guild is not None:
 
-#         if not isinstance(
-#             config,
-#             dict
-#         ):
+                try:
 
-#             return [
-#                 str(config)
-#             ]
+                    discord_id = int(value)
 
-#         for key, value in config.items():
+                    # Channel
+                    channel = guild.get_channel(
+                        discord_id
+                    )
 
-#             display_key = str(
-#                 key
-#             ).replace(
-#                 "_",
-#                 " "
-#             ).title()
-
-#             # ------------------------------------------------
-#             # Nested dictionary
-#             # ------------------------------------------------
-
-#             if isinstance(
-#                 value,
-#                 dict
-#             ):
-
-#                 lines.append(
-#                     f"**{display_key}:**"
-#                 )
-
-#                 nested = (
-#                     self.format_config(
-#                         guild,
-#                         value,
-#                         indent + 1
-#                     )
-#                 )
-
-#                 for line in nested:
-
-#                     lines.append(
-#                         "  " + line
-#                     )
-
-#             # ------------------------------------------------
-#             # List
-#             # ------------------------------------------------
-
-#             elif isinstance(
-#                 value,
-#                 list
-#             ):
-
-#                 if not value:
-
-#                     lines.append(
-#                         f"**{display_key}:** None"
-#                     )
-
-#                 else:
+                    if channel:
 
-#                     lines.append(
-#                         f"**{display_key}:** "
-#                         + ", ".join(
-#                             str(x)
-#                             for x in value
-#                         )
-#                     )
+                        return (
+                            f"{channel.mention} "
+                            f"`({channel.name})`"
+                        )
 
-#             # ------------------------------------------------
-#             # IDs
-#             # ------------------------------------------------
+                    # Role
+                    role = guild.get_role(
+                        discord_id
+                    )
 
-#             elif (
-#                 "channel" in key.lower()
-#                 and "id" in key.lower()
-#             ):
-
-#                 channel = (
-#                     self.get_channel(
-#                         guild,
-#                         value
-#                     )
-#                 )
+                    if role:
 
-#                 if channel:
+                        return (
+                            f"{role.mention} "
+                            f"`({role.name})`"
+                        )
 
-#                     value = channel.mention
+                except Exception:
+                    pass
 
-#                 else:
+            return f"`{value}`"
 
-#                     value = (
-#                         f"Missing (`{value}`)"
-#                     )
+        # --------------------------------------------
+        # Regular string
+        # --------------------------------------------
 
-#                 lines.append(
-#                     f"**{display_key}:** {value}"
-#                 )
+        # Prevent extremely large values
+        if len(value) > 1000:
 
-#             elif (
-#                 "role" in key.lower()
-#                 and "id" in key.lower()
-#             ):
+            value = value[:1000] + "..."
 
-#                 role = (
-#                     self.get_role(
-#                         guild,
-#                         value
-#                     )
-#                 )
+        return f"`{value}`"
 
-#                 if role:
+    # --------------------------------------------------------
+    # List
+    # --------------------------------------------------------
 
-#                     value = role.mention
+    if isinstance(value, list):
 
-#                 else:
+        if not value:
 
-#                     value = (
-#                         f"Missing (`{value}`)"
-#                     )
+            return "`[]`"
 
-#                 lines.append(
-#                     f"**{display_key}:** {value}"
-#                 )
+        result = []
 
-#             # ------------------------------------------------
-#             # Normal value
-#             # ------------------------------------------------
+        for item in value[:50]:
 
-#             else:
+            result.append(
 
-#                 if isinstance(
-#                     value,
-#                     bool
-#                 ):
+                format_value(
+                    item,
+                    guild=guild,
+                    indent=indent + 2
+                )
+            )
 
-#                     value = (
-#                         "Enabled"
-#                         if value
-#                         else "Disabled"
-#                     )
+        if len(value) > 50:
 
-#                 lines.append(
-#                     f"**{display_key}:** "
-#                     f"`{value}`"
-#                 )
+            result.append(
+                f"`... {len(value) - 50} more items`"
+            )
 
-#         return lines
+        return "\n".join(
+            f"{spacing}• {item}"
+            for item in result
+        )
 
-#     # ========================================================
-#     # GET COMMANDS FOR COG
-#     # ========================================================
+    # --------------------------------------------------------
+    # Dictionary
+    # --------------------------------------------------------
 
-#     def get_commands_for_cog(
-#         self,
-#         cog
-#     ):
+    if isinstance(value, dict):
 
-#         commands_found = []
+        if not value:
 
-#         # ----------------------------------------------------
-#         # Slash commands
-#         # ----------------------------------------------------
+            return "`{}`"
 
-#         for command in (
-#             self.bot.tree.walk_commands()
-#         ):
+        result = []
 
-#             try:
+        for key, item in value.items():
 
-#                 binding = getattr(
-#                     command,
-#                     "binding",
-#                     None
-#                 )
+            # ------------------------------------
+            # Special handling for common IDs
+            # ------------------------------------
 
-#                 if binding is cog:
+            readable_key = str(key)
 
-#                     commands_found.append(
-#                         f"/{command.qualified_name}"
-#                     )
+            key_lower = readable_key.lower()
 
-#             except Exception:
+            # Guild ID
+            if (
+                key_lower in {
+                    "guild_id",
+                    "server_id"
+                }
+                and isinstance(item, (int, str))
+            ):
 
-#                 pass
+                guild_text = f"`{item}`"
 
-#         # ----------------------------------------------------
-#         # Prefix commands
-#         # ----------------------------------------------------
+                if guild is not None:
 
-#         for command in self.bot.commands:
+                    try:
 
-#             try:
+                        if int(item) == guild.id:
 
-#                 command_cog = getattr(
-#                     command,
-#                     "cog",
-#                     None
-#                 )
+                            guild_text = (
+                                f"{guild.name} "
+                                f"`({guild.id})`"
+                            )
 
-#                 if command_cog is cog:
+                    except Exception:
+                        pass
 
-#                     commands_found.append(
-#                         f"!{command.name}"
-#                     )
+                result.append(
+                    f"{spacing}**{readable_key}:** "
+                    f"{guild_text}"
+                )
 
-#             except Exception:
+                continue
 
-#                 pass
+            # ------------------------------------
+            # Regular nested value
+            # ------------------------------------
 
-#         return sorted(
-#             set(commands_found)
-#         )
+            formatted = format_value(
 
-#     # ========================================================
-#     # CHECK DISCORD OBJECTS
-#     # ========================================================
+                item,
 
-#     def check_config_objects(
-#         self,
-#         guild,
-#         config
-#     ):
+                guild=guild,
 
-#         missing = []
-#         existing = []
+                indent=indent + 2
+            )
 
-#         def check_dictionary(
-#             data,
-#             parent_key=""
-#         ):
+            result.append(
 
-#             if not isinstance(
-#                 data,
-#                 dict
-#             ):
+                f"{spacing}**{readable_key}:** "
+                f"{formatted}"
+            )
 
-#                 return
+        return "\n".join(result)
 
-#             for key, value in data.items():
+    # --------------------------------------------------------
+    # Unknown
+    # --------------------------------------------------------
 
-#                 key_lower = key.lower()
+    return f"`{str(value)}`"
 
-#                 # --------------------------------------------
-#                 # Channel ID
-#                 # --------------------------------------------
 
-#                 if (
-#                     "channel" in key_lower
-#                     and key_lower.endswith("id")
-#                 ):
+# ============================================================
+# READ JSON FILE
+# ============================================================
 
-#                     channel = (
-#                         self.get_channel(
-#                             guild,
-#                             value
-#                         )
-#                     )
+def read_json_file(
+    filepath
+):
+    """
+    Safely read a JSON file.
+    """
 
-#                     if channel:
+    try:
 
-#                         existing.append(
-#                             f"#{channel.name}"
-#                         )
+        with open(
+            filepath,
+            "r",
+            encoding="utf-8"
+        ) as file:
 
-#                     else:
+            return json.load(file), None
 
-#                         missing.append(
-#                             f"channel `{value}`"
-#                         )
+    except json.JSONDecodeError as error:
 
-#                 # --------------------------------------------
-#                 # Role ID
-#                 # --------------------------------------------
+        return None, (
+            f"Invalid JSON: {error}"
+        )
 
-#                 elif (
-#                     "role" in key_lower
-#                     and key_lower.endswith("id")
-#                 ):
-
-#                     role = (
-#                         self.get_role(
-#                             guild,
-#                             value
-#                         )
-#                     )
-
-#                     if role:
-
-#                         existing.append(
-#                             f"@{role.name}"
-#                         )
-
-#                     else:
-
-#                         missing.append(
-#                             f"role `{value}`"
-#                         )
-
-#                 # --------------------------------------------
-#                 # Nested
-#                 # --------------------------------------------
-
-#                 elif isinstance(
-#                     value,
-#                     dict
-#                 ):
-
-#                     check_dictionary(
-#                         value,
-#                         key
-#                     )
-
-#         check_dictionary(
-#             config
-#         )
-
-#         return (
-#             existing,
-#             missing
-#         )
-
-#     # ========================================================
-#     # REFRESH ONE COG
-#     # ========================================================
-
-#     async def refresh_cog(
-#         self,
-#         cog_name,
-#         cog,
-#         guild
-#     ):
-
-#         # ----------------------------------------------------
-#         # Read persistent configuration
-#         # ----------------------------------------------------
-
-#         saved_config = (
-#             config_manager.get(
-#                 guild.id,
-#                 cog_name
-#             )
-#         )
-
-#         # ----------------------------------------------------
-#         # Custom refresh method
-#         # ----------------------------------------------------
-
-#         refresh_method = getattr(
-#             cog,
-#             "refresh",
-#             None
-#         )
-
-#         if callable(
-#             refresh_method
-#         ):
-
-#             try:
-
-#                 result = (
-#                     await refresh_method()
-#                 )
-
-#                 if isinstance(
-#                     result,
-#                     dict
-#                 ):
-
-#                     return {
-#                         "status": result.get(
-#                             "status",
-#                             "✅"
-#                         ),
-#                         "message": result.get(
-#                             "message",
-#                             "Refresh completed."
-#                         ),
-#                         "config": saved_config
-#                     }
-
-#                 return {
-#                     "status": "✅",
-#                     "message": (
-#                         str(result)
-#                         if result
-#                         else "Refresh completed."
-#                     ),
-#                     "config": saved_config
-#                 }
-
-#             except Exception as e:
-
-#                 traceback.print_exc()
-
-#                 return {
-#                     "status": "❌",
-#                     "message": (
-#                         f"{type(e).__name__}: {e}"
-#                     ),
-#                     "config": saved_config
-#                 }
-
-#         # ----------------------------------------------------
-#         # No custom refresh method
-#         # ----------------------------------------------------
-
-#         if saved_config:
-
-#             existing, missing = (
-#                 self.check_config_objects(
-#                     guild,
-#                     saved_config
-#                 )
-#             )
-
-#             if missing:
-
-#                 message = (
-#                     "Saved configuration found, "
-#                     "but some Discord objects are missing."
-#                 )
-
-#                 status = "⚠️"
-
-#             else:
-
-#                 message = (
-#                     "Saved configuration found "
-#                     "and checked."
-#                 )
-
-#                 status = "✅"
-
-#             return {
-#                 "status": status,
-#                 "message": message,
-#                 "config": saved_config,
-#                 "existing": existing,
-#                 "missing": missing
-#             }
-
-#         # ----------------------------------------------------
-#         # No configuration
-#         # ----------------------------------------------------
-
-#         return {
-#             "status": "⚪",
-#             "message": (
-#                 "No saved configuration."
-#             ),
-#             "config": {}
-#         }
-
-#     # ========================================================
-#     # /REFRESH
-#     # ========================================================
-
-#     @app_commands.command(
-#         name="refresh",
-#         description=(
-#             "Check all bot systems and saved setup."
-#         )
-#     )
-#     @app_commands.checks.has_permissions(
-#         administrator=True
-#     )
-#     async def refresh(
-#         self,
-#         interaction: discord.Interaction
-#     ):
-
-#         if interaction.guild is None:
-
-#             await interaction.response.send_message(
-#                 "❌ This command can only be used inside a server.",
-#                 ephemeral=True
-#             )
-
-#             return
-
-#         await interaction.response.defer(
-#             ephemeral=True
-#         )
-
-#         guild = interaction.guild
-
-#         results = []
-
-#         # ====================================================
-#         # CHECK EVERY COG
-#         # ====================================================
-
-#         for cog_name, cog in self.bot.cogs.items():
-
-#             if cog_name == "Refresh":
-
-#                 continue
-
-#             print(
-#                 f"🔄 Refreshing {cog_name}"
-#             )
+    except Exception as error:
 
-#             result = (
-#                 await self.refresh_cog(
-#                     cog_name,
-#                     cog,
-#                     guild
-#                 )
-#             )
+        return None, (
+            f"{type(error).__name__}: {error}"
+        )
 
-#             result["commands"] = (
-#                 self.get_commands_for_cog(
-#                     cog
-#                 )
-#             )
-
-#             results.append(
-#                 (
-#                     cog_name,
-#                     result
-#                 )
-#             )
 
-#         # ====================================================
-#         # BUILD REPORT
-#         # ====================================================
+# ============================================================
+# FIND JSON CONFIGURATION FILES
+# ============================================================
 
-#         embeds = []
+def find_json_files():
 
-#         embed = discord.Embed(
+    files = []
 
-#             title="🔄 Bot Configuration",
+    # --------------------------------------------------------
+    # Search project root
+    # --------------------------------------------------------
 
-#             description=(
-#                 f"Complete configuration report "
-#                 f"for **{guild.name}**"
-#             ),
+    for filepath in CONFIG_ROOT.glob("*.json"):
 
-#             color=discord.Color.blue()
-#         )
+        if filepath.name in IGNORED_JSON_FILES:
+            continue
 
-#         field_count = 0
+        files.append(filepath)
 
-#         successful = 0
-#         warnings = 0
-#         errors = 0
-#         unconfigured = 0
-#         command_count = 0
+    # --------------------------------------------------------
+    # Also search cogs folder
+    # --------------------------------------------------------
 
-#         for cog_name, result in results:
+    cogs_folder = CONFIG_ROOT / "cogs"
 
-#             status = result.get(
-#                 "status",
-#                 "⚪"
-#             )
+    if cogs_folder.exists():
 
-#             message = result.get(
-#                 "message",
-#                 ""
-#             )
+        for filepath in cogs_folder.glob("*.json"):
 
-#             config = result.get(
-#                 "config",
-#                 {}
-#             )
+            if filepath.name in IGNORED_JSON_FILES:
+                continue
 
-#             commands_list = result.get(
-#                 "commands",
-#                 []
-#             )
+            if filepath not in files:
 
-#             existing = result.get(
-#                 "existing",
-#                 []
-#             )
+                files.append(filepath)
 
-#             missing = result.get(
-#                 "missing",
-#                 []
-#             )
+    # --------------------------------------------------------
+    # Sort
+    # --------------------------------------------------------
 
-#             # ------------------------------------------------
-#             # Counters
-#             # ------------------------------------------------
+    files.sort(
+        key=lambda path: path.name.lower()
+    )
 
-#             if status == "✅":
+    return files
 
-#                 successful += 1
 
-#             elif status == "⚠️":
+# ============================================================
+# CREATE DISPLAY NAME
+# ============================================================
 
-#                 warnings += 1
+def cog_name_from_file(
+    filename
+):
 
-#             elif status == "❌":
+    name = Path(
+        filename
+    ).stem
 
-#                 errors += 1
+    # Remove common suffix
+    if name.lower().endswith("_config"):
 
-#             else:
+        name = name[:-7]
 
-#                 unconfigured += 1
+    elif name.lower().endswith("config"):
 
-#             command_count += len(
-#                 commands_list
-#             )
+        name = name[:-6]
 
-#             # ------------------------------------------------
-#             # Configuration text
-#             # ------------------------------------------------
+    # Replace separators
+    name = name.replace(
+        "_",
+        " "
+    )
 
-#             config_lines = (
-#                 self.format_config(
-#                     guild,
-#                     config
-#                 )
-#             )
+    name = name.replace(
+        "-",
+        " "
+    )
 
-#             if config_lines:
+    # Capitalize
+    return name.title()
 
-#                 config_text = "\n".join(
-#                     config_lines
-#                 )
 
-#             else:
+# ============================================================
+# FIND GUILD CONFIGURATION
+# ============================================================
 
-#                 config_text = (
-#                     "No saved setup."
-#                 )
+def get_guild_data(
+    data,
+    guild_id
+):
+    """
+    Try to find the configuration belonging
+    to the current Discord server.
 
-#             # ------------------------------------------------
-#             # Existing objects
-#             # ------------------------------------------------
+    Supports structures such as:
 
-#             if existing:
+    {
+        "123456789": {...}
+    }
 
-#                 existing_text = (
-#                     "\n\n"
-#                     "📍 **Existing:**\n"
-#                     + ", ".join(existing[:10])
-#                 )
+    or:
 
-#             else:
+    {
+        "guild_id": 123456789,
+        ...
+    }
 
-#                 existing_text = ""
+    or:
 
-#             # ------------------------------------------------
-#             # Missing objects
-#             # ------------------------------------------------
+    {
+        "guilds": {
+            "123456789": {...}
+        }
+    }
+    """
 
-#             if missing:
+    guild_id = str(guild_id)
 
-#                 missing_text = (
-#                     "\n\n"
-#                     "⚠️ **Missing:**\n"
-#                     + ", ".join(missing[:10])
-#                 )
+    # --------------------------------------------------------
+    # Not dictionary
+    # --------------------------------------------------------
 
-#             else:
+    if not isinstance(data, dict):
 
-#                 missing_text = ""
+        return None
 
-#             # ------------------------------------------------
-#             # Commands
-#             # ------------------------------------------------
+    # --------------------------------------------------------
+    # Direct guild key
+    # --------------------------------------------------------
 
-#             if commands_list:
+    if guild_id in data:
 
-#                 commands_text = (
-#                     "\n".join(
-#                         f"`{x}`"
-#                         for x in commands_list
-#                     )
-#                 )
+        return data[guild_id]
 
-#             else:
+    # --------------------------------------------------------
+    # Integer guild key
+    # --------------------------------------------------------
 
-#                 commands_text = (
-#                     "No commands."
-#                 )
+    try:
 
-#             # Keep Discord field below 1024 chars
-#             value = (
-#                 f"{status} **{message}**\n\n"
-#                 f"⚙️ **Setup:**\n"
-#                 f"{config_text}"
-#                 f"{existing_text}"
-#                 f"{missing_text}\n\n"
-#                 f"🛠️ **Commands:**\n"
-#                 f"{commands_text}"
-#             )
+        integer_guild_id = int(guild_id)
 
-#             if len(value) > 1000:
+        if integer_guild_id in data:
 
-#                 value = (
-#                     value[:970]
-#                     + "\n..."
-#                 )
+            return data[integer_guild_id]
 
-#             embed.add_field(
+    except Exception:
+        pass
 
-#                 name=f"📦 {cog_name}",
+    # --------------------------------------------------------
+    # Search common containers
+    # --------------------------------------------------------
 
-#                 value=value,
+    for container_name in (
+        "guilds",
+        "servers",
+        "configurations",
+        "configs",
+        "data"
+    ):
 
-#                 inline=False
-#             )
+        container = data.get(
+            container_name
+        )
 
-#             field_count += 1
+        if isinstance(
+            container,
+            dict
+        ):
 
-#             # Discord maximum is 25 fields.
-#             # Keep room for summary.
+            if guild_id in container:
 
-#             if field_count >= 20:
+                return container[guild_id]
 
-#                 embeds.append(
-#                     embed
-#                 )
+    # --------------------------------------------------------
+    # Check guild_id inside object
+    # --------------------------------------------------------
 
-#                 embed = discord.Embed(
+    if (
+        str(
+            data.get(
+                "guild_id",
+                ""
+            )
+        ) == guild_id
+    ):
 
-#                     title=(
-#                         "🔄 Bot Configuration "
-#                         "— Continued"
-#                     ),
+        return data
 
-#                     color=discord.Color.blue()
-#                 )
+    # --------------------------------------------------------
+    # Check server_id
+    # --------------------------------------------------------
 
-#                 field_count = 0
+    if (
+        str(
+            data.get(
+                "server_id",
+                ""
+            )
+        ) == guild_id
+    ):
 
-#         # ----------------------------------------------------
-#         # Remaining embed
-#         # ----------------------------------------------------
+        return data
 
-#         if field_count:
+    # --------------------------------------------------------
+    # Nothing found
+    # --------------------------------------------------------
 
-#             embeds.append(
-#                 embed
-#             )
+    return None
 
-#         # ====================================================
-#         # SUMMARY
-#         # ====================================================
 
-#         summary = discord.Embed(
+# ============================================================
+# DETECT WHETHER JSON HAS GUILD CONFIGURATION
+# ============================================================
 
-#             title="📊 Refresh Summary",
+def has_any_configuration(
+    data
+):
 
-#             description=(
+    if data is None:
+        return False
 
-#                 f"📦 **Cogs checked:** "
-#                 f"`{len(results)}`\n\n"
+    if isinstance(
+        data,
+        dict
+    ):
 
-#                 f"✅ **Configured:** "
-#                 f"`{successful}`\n"
+        return len(data) > 0
 
-#                 f"⚠️ **Warnings:** "
-#                 f"`{warnings}`\n"
+    if isinstance(
+        data,
+        list
+    ):
 
-#                 f"❌ **Errors:** "
-#                 f"`{errors}`\n"
+        return len(data) > 0
 
-#                 f"⚪ **Not configured:** "
-#                 f"`{unconfigured}`\n\n"
+    return True
 
-#                 f"⚙️ **Commands detected:** "
-#                 f"`{command_count}`"
-#             ),
 
-#             color=(
-#                 discord.Color.green()
-#                 if errors == 0
-#                 else discord.Color.red()
-#             )
-#         )
+# ============================================================
+# CREATE FILE SUMMARY
+# ============================================================
 
-#         summary.set_footer(
-#             text=(
-#                 f"Requested by "
-#                 f"{interaction.user}"
-#             )
-#         )
+def create_file_summary(
+    filepath,
+    guild
+):
 
-#         # ====================================================
-#         # SEND
-#         # ====================================================
+    filename = filepath.name
 
-#         for report in embeds:
+    cog_name = cog_name_from_file(
+        filename
+    )
 
-#             await interaction.followup.send(
-#                 embed=report,
-#                 ephemeral=True
-#             )
+    data, error = read_json_file(
+        filepath
+    )
 
-#         await interaction.followup.send(
-#             embed=summary,
-#             ephemeral=True
-#         )
+    # --------------------------------------------------------
+    # Header
+    # --------------------------------------------------------
 
-#     # ========================================================
-#     # ERROR
-#     # ========================================================
+    lines = []
 
-#     @refresh.error
-#     async def refresh_error(
-#         self,
-#         interaction,
-#         error
-#     ):
+    lines.append(
+        f"📦 **{cog_name}**"
+    )
 
-#         if isinstance(
-#             error,
-#             app_commands.errors.MissingPermissions
-#         ):
+    lines.append(
+        f"📄 `{filename}`"
+    )
 
-#             message = (
-#                 "❌ You need Administrator "
-#                 "permission to use `/refresh`."
-#             )
+    # --------------------------------------------------------
+    # Read error
+    # --------------------------------------------------------
 
-#         else:
+    if error:
 
-#             traceback.print_exc()
+        lines.append(
+            f"❌ **Error:** {error}"
+        )
 
-#             message = (
-#                 "❌ Refresh failed:\n"
-#                 f"`{type(error).__name__}: {error}`"
-#             )
+        return "\n".join(lines)
 
-#         try:
+    # --------------------------------------------------------
+    # Empty file
+    # --------------------------------------------------------
 
-#             if interaction.response.is_done():
+    if not has_any_configuration(data):
 
-#                 await interaction.followup.send(
-#                     message,
-#                     ephemeral=True
-#                 )
+        lines.append(
+            "⚪ **Configuration file is empty.**"
+        )
 
-#             else:
+        return "\n".join(lines)
 
-#                 await interaction.response.send_message(
-#                     message,
-#                     ephemeral=True
-#                 )
+    # --------------------------------------------------------
+    # Find guild configuration
+    # --------------------------------------------------------
 
-#         except Exception:
+    guild_config = get_guild_data(
 
-#             pass
+        data,
 
+        guild.id
+    )
 
-# # ============================================================
-# # SETUP
-# # ============================================================
+    # --------------------------------------------------------
+    # Guild-specific configuration
+    # --------------------------------------------------------
 
-# async def setup(bot):
+    if guild_config is not None:
 
-#     await bot.add_cog(
-#         Refresh(bot)
-#     )
+        lines.append(
+            "🟢 **Guild configuration found.**"
+        )
 
-#     print(
-#         "✅ Refresh Cog ready."
-#     )
+        formatted = format_value(
+
+            guild_config,
+
+            guild=guild
+        )
+
+        if formatted:
+
+            lines.append(
+                formatted
+            )
+
+        return "\n".join(lines)
+
+    # --------------------------------------------------------
+    # File exists but no guild-specific config
+    # --------------------------------------------------------
+
+    lines.append(
+        "🟡 **Configuration file found, "
+        "but no configuration for this server.**"
+    )
+
+    # --------------------------------------------------------
+    # Show top-level information
+    # --------------------------------------------------------
+
+    if isinstance(
+        data,
+        dict
+    ):
+
+        # If the file contains guild IDs,
+        # show which servers are configured.
+        guild_keys = []
+
+        for key in data.keys():
+
+            if is_guild_id(
+                str(key)
+            ):
+
+                guild_keys.append(
+                    str(key)
+                )
+
+        if guild_keys:
+
+            lines.append(
+                f"🌐 **Servers configured:** "
+                f"`{len(guild_keys)}`"
+            )
+
+            if str(guild.id) not in guild_keys:
+
+                lines.append(
+                    "⚠️ This server is not "
+                    "present in the file."
+                )
+
+        else:
+
+            # Show global configuration
+            formatted = format_value(
+
+                data,
+
+                guild=guild
+            )
+
+            if formatted:
+
+                lines.append(
+                    "⚙️ **Global configuration:**"
+                )
+
+                lines.append(
+                    formatted
+                )
+
+    return "\n".join(lines)
+
+
+# ============================================================
+# REFRESH COG
+# ============================================================
+
+class Refresh(commands.Cog):
+
+    def __init__(
+        self,
+        bot
+    ):
+
+        self.bot = bot
+
+        print(
+            "🔄 Refresh configuration system loaded."
+        )
+
+    # ========================================================
+    # /REFRESH
+    # ========================================================
+
+    @app_commands.command(
+
+        name="refresh",
+
+        description=(
+            "Read and display all saved bot configurations."
+        )
+    )
+    @app_commands.checks.has_permissions(
+        administrator=True
+    )
+    async def refresh(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        # ----------------------------------------------------
+        # Server only
+        # ----------------------------------------------------
+
+        if interaction.guild is None:
+
+            await interaction.response.send_message(
+
+                "❌ This command can only be used "
+                "inside a server.",
+
+                ephemeral=True
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Defer
+        # ----------------------------------------------------
+
+        await interaction.response.defer(
+            ephemeral=True
+        )
+
+        guild = interaction.guild
+
+        # ----------------------------------------------------
+        # Find JSON files
+        # ----------------------------------------------------
+
+        json_files = find_json_files()
+
+        # ----------------------------------------------------
+        # No files
+        # ----------------------------------------------------
+
+        if not json_files:
+
+            await interaction.followup.send(
+
+                "📊 **Bot Configuration Refresh**\n\n"
+
+                "❌ No JSON configuration files "
+                "were found.",
+
+                ephemeral=True
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Counters
+        # ----------------------------------------------------
+
+        total_files = len(
+            json_files
+        )
+
+        configured = 0
+        not_configured = 0
+        errors = 0
+
+        # ----------------------------------------------------
+        # Generate summaries
+        # ----------------------------------------------------
+
+        summaries = []
+
+        for filepath in json_files:
+
+            summary = create_file_summary(
+
+                filepath,
+
+                guild
+            )
+
+            summaries.append(
+                summary
+            )
+
+            # --------------------------------------------
+            # Determine status
+            # --------------------------------------------
+
+            if "❌ **Error:**" in summary:
+
+                errors += 1
+
+            elif "🟢 **Guild configuration found.**" in summary:
+
+                configured += 1
+
+            else:
+
+                not_configured += 1
+
+        # ----------------------------------------------------
+        # Main summary
+        # ----------------------------------------------------
+
+        overview = (
+
+            "📊 **BOT CONFIGURATION REFRESH**\n\n"
+
+            f"🏠 **Server:** {guild.name}\n\n"
+
+            f"📦 **Configuration files found:** "
+            f"`{total_files}`\n"
+
+            f"🟢 **Configured for this server:** "
+            f"`{configured}`\n"
+
+            f"🟡 **Not configured for this server:** "
+            f"`{not_configured}`\n"
+
+            f"❌ **Errors:** "
+            f"`{errors}`\n\n"
+
+            "━━━━━━━━━━━━━━━━━━━━"
+        )
+
+        # ----------------------------------------------------
+        # Build chunks
+        # ----------------------------------------------------
+
+        messages = []
+
+        current = overview
+
+        for summary in summaries:
+
+            addition = (
+                "\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                + summary
+            )
+
+            # Discord message limit
+            if (
+                len(current)
+                + len(addition)
+                > 3900
+            ):
+
+                messages.append(
+                    current
+                )
+
+                current = summary
+
+            else:
+
+                current += addition
+
+        if current:
+
+            messages.append(
+                current
+            )
+
+        # ----------------------------------------------------
+        # Send first page
+        # ----------------------------------------------------
+
+        for index, content in enumerate(
+            messages
+        ):
+
+            embed = discord.Embed(
+
+                title=(
+                    "📊 Bot Configuration Refresh"
+                    if index == 0
+                    else
+                    f"📊 Configuration "
+                    f"Page {index + 1}"
+                ),
+
+                description=content,
+
+                color=(
+                    discord.Color.green()
+                    if errors == 0
+                    else discord.Color.orange()
+                ),
+
+                timestamp=datetime.utcnow()
+            )
+
+            embed.set_footer(
+
+                text=(
+                    f"Page {index + 1}/{len(messages)}"
+                )
+            )
+
+            await interaction.followup.send(
+
+                embed=embed,
+
+                ephemeral=True
+            )
+
+    # ========================================================
+    # /CONFIGFILES
+    # ========================================================
+
+    @app_commands.command(
+
+        name="configfiles",
+
+        description=(
+            "Show all configuration files detected by the bot."
+        )
+    )
+    @app_commands.checks.has_permissions(
+        administrator=True
+    )
+    async def configfiles(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        await interaction.response.defer(
+            ephemeral=True
+        )
+
+        files = find_json_files()
+
+        if not files:
+
+            await interaction.followup.send(
+
+                "❌ No JSON configuration files found.",
+
+                ephemeral=True
+            )
+
+            return
+
+        text = "\n".join(
+
+            f"📄 `{file.name}`"
+
+            for file in files
+        )
+
+        if len(text) > 3900:
+
+            text = text[:3900] + "\n..."
+
+        embed = discord.Embed(
+
+            title="📂 Configuration Files",
+
+            description=text,
+
+            color=discord.Color.blurple()
+        )
+
+        embed.set_footer(
+
+            text=f"{len(files)} configuration file(s) detected."
+        )
+
+        await interaction.followup.send(
+
+            embed=embed,
+
+            ephemeral=True
+        )
+
+    # ========================================================
+    # /CONFIGREAD
+    # ========================================================
+
+    @app_commands.command(
+
+        name="configread",
+
+        description=(
+            "Read one specific JSON configuration file."
+        )
+    )
+    @app_commands.describe(
+
+        filename=(
+            "Example: voice_config.json"
+        )
+    )
+    @app_commands.checks.has_permissions(
+        administrator=True
+    )
+    async def configread(
+        self,
+        interaction: discord.Interaction,
+        filename: str
+    ):
+
+        await interaction.response.defer(
+            ephemeral=True
+        )
+
+        # ----------------------------------------------------
+        # Security:
+        # Prevent directory traversal
+        # ----------------------------------------------------
+
+        filename = os.path.basename(
+            filename
+        )
+
+        filepath = CONFIG_ROOT / filename
+
+        # ----------------------------------------------------
+        # File doesn't exist
+        # ----------------------------------------------------
+
+        if not filepath.exists():
+
+            await interaction.followup.send(
+
+                f"❌ Configuration file not found:\n"
+                f"`{filename}`",
+
+                ephemeral=True
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Read
+        # ----------------------------------------------------
+
+        summary = create_file_summary(
+
+            filepath,
+
+            interaction.guild
+        )
+
+        # ----------------------------------------------------
+        # Too large
+        # ----------------------------------------------------
+
+        if len(summary) <= 3900:
+
+            embed = discord.Embed(
+
+                title=f"📄 {filename}",
+
+                description=summary,
+
+                color=discord.Color.blurple()
+            )
+
+            await interaction.followup.send(
+
+                embed=embed,
+
+                ephemeral=True
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Split
+        # ----------------------------------------------------
+
+        chunks = []
+
+        while summary:
+
+            chunk = summary[:3900]
+
+            # Try to split at newline
+            newline = chunk.rfind(
+                "\n"
+            )
+
+            if newline > 1000:
+
+                chunk = chunk[:newline]
+
+            chunks.append(
+                chunk
+            )
+
+            summary = summary[
+                len(chunk):
+            ]
+
+        for index, chunk in enumerate(
+            chunks
+        ):
+
+            embed = discord.Embed(
+
+                title=(
+                    f"📄 {filename}"
+                    if index == 0
+                    else
+                    f"📄 {filename} "
+                    f"(Page {index + 1})"
+                ),
+
+                description=chunk,
+
+                color=discord.Color.blurple()
+            )
+
+            await interaction.followup.send(
+
+                embed=embed,
+
+                ephemeral=True
+            )
+
+    # ========================================================
+    # ERROR HANDLER
+    # ========================================================
+
+    @refresh.error
+    async def refresh_error(
+        self,
+        interaction,
+        error
+    ):
+
+        if isinstance(
+            error,
+            app_commands.errors.MissingPermissions
+        ):
+
+            message = (
+                "❌ You need **Administrator** "
+                "permission to use `/refresh`."
+            )
+
+        else:
+
+            print(
+                f"❌ /refresh error: {error}"
+            )
+
+            message = (
+                "❌ An error occurred while "
+                "reading the bot configuration."
+            )
+
+        try:
+
+            if interaction.response.is_done():
+
+                await interaction.followup.send(
+
+                    message,
+
+                    ephemeral=True
+                )
+
+            else:
+
+                await interaction.response.send_message(
+
+                    message,
+
+                    ephemeral=True
+                )
+
+        except Exception:
+
+            pass
+
+
+# ============================================================
+# SETUP
+# ============================================================
+
+async def setup(bot):
+
+    await bot.add_cog(
+        Refresh(bot)
+    )
+
+    print(
+        "✅ Refresh Cog loaded successfully."
+    )
