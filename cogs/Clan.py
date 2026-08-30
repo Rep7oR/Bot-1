@@ -50,9 +50,14 @@ CONFIG_FILE = os.path.join(
     "clans_config.json"
 )
 
-DATA_FILE = os.path.join(
-    PERSIST_DIR,
-    "clans_data.json"
+DATA_FILE = "clan_data.json"
+
+data_lock = asyncio.Lock()
+
+def load_data():
+    ...
+    
+clan_data = load_data()
 )
 
 
