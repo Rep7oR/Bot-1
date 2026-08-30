@@ -7,73 +7,82 @@ import json
 import os
 
 
-# =========================================================
+# ============================================================
 # CONFIGURATION
-# =========================================================
+# ============================================================
 
 CONFIG_FILE = "cmd_config.json"
 
-# Roles allowed to use /cmd
 MODERATOR_ROLE_NAMES = [
     "MODERATOR",
     "Moderators",
+    "Moderator",
     "Mod"
 ]
 
 
-# =========================================================
+# ============================================================
 # JSON FUNCTIONS
-# =========================================================
+# ============================================================
 
-def load_json(filename):
+def load_config():
 
-    if not os.path.exists(filename):
+    if not os.path.exists(CONFIG_FILE):
         return {}
 
     try:
 
         with open(
-            filename,
+            CONFIG_FILE,
             "r",
             encoding="utf-8"
-        ) as file:
+        ) as f:
 
-            return json.load(file)
+            return json.load(f)
 
-    except (
-        json.JSONDecodeError,
-        FileNotFoundError
-    ):
+    except Exception as e:
+
+        print(
+            f"❌ Could not load {CONFIG_FILE}: {e}"
+        )
 
         return {}
 
 
-def save_json(filename, data):
+def save_config(data):
 
-    with open(
-        filename,
-        "w",
-        encoding="utf-8"
-    ) as file:
+    try:
 
-        json.dump(
-            data,
-            file,
-            indent=4
+        with open(
+            CONFIG_FILE,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            json.dump(
+                data,
+                f,
+                indent=4
+            )
+
+    except Exception as e:
+
+        print(
+            f"❌ Could not save {CONFIG_FILE}: {e}"
         )
 
 
-# =========================================================
+# ============================================================
 # MODERATOR CHECK
-# =========================================================
+# ============================================================
 
-def is_moderator(member: discord.Member):
+def is_moderator(
+    member: discord.Member
+):
 
-    # Administrator always has access
     if member.guild_permissions.administrator:
         return True
 
-    # Moderator roles
     for role in member.roles:
 
         if role.name in MODERATOR_ROLE_NAMES:
@@ -82,43 +91,35 @@ def is_moderator(member: discord.Member):
     return False
 
 
-# =========================================================
+# ============================================================
 # COMMAND SYSTEM
-# =========================================================
+# ============================================================
 
 class CommandSystem(commands.Cog):
 
-    def __init__(self, bot):
+    def __init__(
+        self,
+        bot: commands.Bot
+    ):
 
         self.bot = bot
 
-        self.config = load_json(
-            CONFIG_FILE
+        self.config = load_config()
+
+        print(
+            "✅ Command System loaded."
         )
 
-    # =====================================================
-    # SAVE CONFIG
-    # =====================================================
-
-    def save_config(self):
-
-        save_json(
-            CONFIG_FILE,
-            self.config
-        )
-
-    # =====================================================
+    # ========================================================
     # GET GUILD CONFIG
-    # =====================================================
+    # ========================================================
 
     def get_guild_config(
         self,
-        guild: discord.Guild
+        guild_id: int
     ):
 
-        guild_id = str(
-            guild.id
-        )
+        guild_id = str(guild_id)
 
         if guild_id not in self.config:
 
@@ -126,9 +127,9 @@ class CommandSystem(commands.Cog):
 
         return self.config[guild_id]
 
-    # =====================================================
-    # GET CONFIGURED CHANNEL
-    # =====================================================
+    # ========================================================
+    # GET COMMAND CHANNEL
+    # ========================================================
 
     def get_command_channel(
         self,
@@ -141,14 +142,14 @@ class CommandSystem(commands.Cog):
         )
 
         channel_id = guild_config.get(
-            "command_channel_id"
+            "channel_id"
         )
 
         if not channel_id:
             return None
 
         channel = guild.get_channel(
-            channel_id
+            int(channel_id)
         )
 
         if isinstance(
@@ -160,189 +161,299 @@ class CommandSystem(commands.Cog):
 
         return None
 
-    # =====================================================
-    # CLEAN COG NAME
-    # =====================================================
+    # ========================================================
+    # GET ALL REGISTERED COMMANDS
+    # ========================================================
 
-    def clean_cog_name(
-        self,
-        cog_name
-    ):
-
-        if not cog_name:
-            return "Other Commands"
-
-        name = cog_name
-
-        # Remove common words
-        replacements = [
-            "Cog",
-            "System",
-            "Commands"
-        ]
-
-        for word in replacements:
-
-            name = name.replace(
-                word,
-                ""
-            )
-
-        name = name.strip()
-
-        if not name:
-            name = cog_name
-
-        return name.upper()
-
-    # =====================================================
-    # GET ALL APPLICATION COMMANDS
-    # =====================================================
-
-    def get_all_commands(
-        self,
-        guild: discord.Guild
-    ):
+    def get_all_commands(self):
 
         """
-        Gets commands from every loaded Cog.
+        Gets commands directly from the bot's
+        application command tree.
 
-        We use the bot's registered application
-        command tree rather than manually defining
-        the command list.
+        This means the command panel shows commands
+        that are actually registered with Discord.
         """
 
-        commands_list = []
+        try:
 
-        # -------------------------------------------------
-        # GET COMMANDS FROM COGS
-        # -------------------------------------------------
+            return self.bot.tree.get_commands()
 
-        for cog_name, cog in self.bot.cogs.items():
+        except Exception as e:
 
-            try:
-
-                cog_commands = cog.get_app_commands()
-
-            except AttributeError:
-
-                continue
-
-            for command in cog_commands:
-
-                commands_list.append(
-                    (
-                        cog_name,
-                        command
-                    )
-                )
-
-        # -------------------------------------------------
-        # REMOVE DUPLICATES
-        # -------------------------------------------------
-
-        unique = {}
-
-        for cog_name, command in commands_list:
-
-            key = (
-                cog_name,
-                command.qualified_name
+            print(
+                f"❌ Could not get application commands: {e}"
             )
 
-            unique[key] = command
+            return []
 
-        return [
-            (
-                cog_name,
-                command
-            )
+    # ========================================================
+    # GET COMMAND COG NAME
+    # ========================================================
 
-            for (
-                cog_name,
-                command
-            ) in unique.items()
-        ]
-
-    # =====================================================
-    # GET SUBCOMMANDS
-    # =====================================================
-
-    def get_command_text(
+    def get_cog_name(
         self,
         command
     ):
 
         """
-        Converts a Discord application command
-        into a readable command string.
+        Attempts to identify which Cog owns
+        the application command.
         """
+
+        # ----------------------------------------------------
+        # Try command callback
+        # ----------------------------------------------------
+
+        callback = getattr(
+            command,
+            "callback",
+            None
+        )
+
+        if callback:
+
+            callback_self = getattr(
+                callback,
+                "__self__",
+                None
+            )
+
+            if callback_self:
+
+                cog_name = getattr(
+                    callback_self,
+                    "qualified_name",
+                    None
+                )
+
+                if cog_name:
+
+                    return cog_name
+
+                cog_name = getattr(
+                    callback_self,
+                    "__class__",
+                    type(
+                        "x",
+                        (),
+                        {}
+                    )
+                ).__name__
+
+                if cog_name:
+
+                    return cog_name
+
+        # ----------------------------------------------------
+        # Try binding
+        # ----------------------------------------------------
+
+        binding = getattr(
+            command,
+            "binding",
+            None
+        )
+
+        if binding:
+
+            cog_name = getattr(
+                binding,
+                "qualified_name",
+                None
+            )
+
+            if cog_name:
+
+                return cog_name
+
+            cog_name = binding.__class__.__name__
+
+            if cog_name:
+
+                return cog_name
+
+        # ----------------------------------------------------
+        # Fallback
+        # ----------------------------------------------------
+
+        return "Other Commands"
+
+    # ========================================================
+    # CLEAN COG NAME
+    # ========================================================
+
+    def clean_cog_name(
+        self,
+        name: str
+    ):
+
+        replacements = [
+            "Commands",
+            "Command",
+            "System",
+            "Manager",
+            "Cog"
+        ]
+
+        cleaned = name
+
+        for word in replacements:
+
+            cleaned = cleaned.replace(
+                word,
+                ""
+            )
+
+        cleaned = cleaned.strip()
+
+        if not cleaned:
+
+            cleaned = name
+
+        return cleaned.upper()
+
+    # ========================================================
+    # COMMAND DESCRIPTION
+    # ========================================================
+
+    def get_description(
+        self,
+        command
+    ):
+
+        description = getattr(
+            command,
+            "description",
+            None
+        )
+
+        if not description:
+
+            return "No description available."
+
+        return description
+
+    # ========================================================
+    # FORMAT COMMAND
+    # ========================================================
+
+    def format_command(
+        self,
+        command
+    ):
 
         try:
 
-            return f"`/{command.qualified_name}`"
+            command_name = command.qualified_name
 
         except AttributeError:
 
-            return f"`/{command.name}`"
+            command_name = command.name
 
-    # =====================================================
-    # CREATE COMMAND EMBEDS
-    # =====================================================
+        description = self.get_description(
+            command
+        )
 
-    def create_command_embeds(
+        return (
+            f"`/{command_name}`\n"
+            f"↳ {description}"
+        )
+
+    # ========================================================
+    # CREATE EMBEDS
+    # ========================================================
+
+    def create_embeds(
         self,
         guild: discord.Guild
     ):
 
-        grouped_commands = {}
+        commands_list = self.get_all_commands()
 
-        # -------------------------------------------------
-        # COLLECT COMMANDS
-        # -------------------------------------------------
+        # ----------------------------------------------------
+        # Remove default Discord commands that are not
+        # actually application commands in this bot.
+        # ----------------------------------------------------
 
-        for cog_name, command in self.get_all_commands(
-            guild
-        ):
+        valid_commands = []
 
-            if cog_name not in grouped_commands:
+        for command in commands_list:
 
-                grouped_commands[cog_name] = []
+            if not isinstance(
+                command,
+                app_commands.Command
+            ):
 
-            grouped_commands[cog_name].append(
+                continue
+
+            valid_commands.append(
                 command
             )
 
-        # -------------------------------------------------
-        # SORT COGS
-        # -------------------------------------------------
+        # ----------------------------------------------------
+        # Sort
+        # ----------------------------------------------------
 
-        sorted_groups = sorted(
+        valid_commands.sort(
 
-            grouped_commands.items(),
-
-            key=lambda item: item[0].lower()
+            key=lambda command:
+            command.qualified_name.lower()
         )
 
-        # -------------------------------------------------
-        # NO COMMANDS
-        # -------------------------------------------------
+        # ----------------------------------------------------
+        # Nothing found
+        # ----------------------------------------------------
 
-        if not sorted_groups:
+        if not valid_commands:
 
             embed = discord.Embed(
 
                 title="🤖 Bot Commands",
 
                 description=(
-                    "No slash commands were found "
-                    "in the loaded cogs."
+
+                    "No application commands are "
+                    "currently registered.\n\n"
+
+                    "Make sure your cogs are loaded "
+                    "and your slash commands are synced."
                 ),
 
-                color=discord.Color.blurple()
+                color=discord.Color.red()
             )
 
+            if guild.icon:
+
+                embed.set_thumbnail(
+                    url=guild.icon.url
+                )
+
             return [embed]
+
+        # ----------------------------------------------------
+        # GROUP COMMANDS BY COG
+        # ----------------------------------------------------
+
+        grouped = {}
+
+        for command in valid_commands:
+
+            cog_name = self.get_cog_name(
+                command
+            )
+
+            if cog_name not in grouped:
+
+                grouped[cog_name] = []
+
+            grouped[cog_name].append(
+                command
+            )
+
+        # ----------------------------------------------------
+        # CREATE EMBEDS
+        # ----------------------------------------------------
 
         embeds = []
 
@@ -351,9 +462,11 @@ class CommandSystem(commands.Cog):
             title="🤖 Bot Commands",
 
             description=(
-                "All available commands for this server.\n\n"
+
+                "All available commands for this bot.\n\n"
+
                 "Commands are automatically collected "
-                "from every loaded cog."
+                "from the bot's loaded application commands."
             ),
 
             color=discord.Color.blurple()
@@ -365,40 +478,53 @@ class CommandSystem(commands.Cog):
                 url=guild.icon.url
             )
 
-        command_count = 0
+        total_commands = 0
 
-        # -------------------------------------------------
-        # ADD COGS
-        # -------------------------------------------------
+        field_count = 0
 
-        for cog_name, commands_list in sorted_groups:
+        # ----------------------------------------------------
+        # GROUPS
+        # ----------------------------------------------------
 
-            commands_list.sort(
+        for cog_name in sorted(
+            grouped.keys(),
+            key=lambda x: x.lower()
+        ):
+
+            command_lines = []
+
+            commands_in_cog = grouped[
+                cog_name
+            ]
+
+            commands_in_cog.sort(
 
                 key=lambda command:
                 command.qualified_name.lower()
             )
 
-            command_lines = []
-
-            for command in commands_list:
+            for command in commands_in_cog:
 
                 command_lines.append(
 
-                    f"{self.get_command_text(command)}"
-                    f" — {command.description or 'No description'}"
+                    self.format_command(
+                        command
+                    )
                 )
+
+            field_value = "\n\n".join(
+                command_lines
+            )
 
             cog_title = self.clean_cog_name(
                 cog_name
             )
 
-            field_value = "\n".join(
-                command_lines
-            )
+            # ------------------------------------------------
+            # Discord field limit
+            # ------------------------------------------------
 
-            # Discord embed field limit
-            if len(field_value) > 1000:
+            if len(field_value) > 1024:
 
                 chunks = []
 
@@ -406,16 +532,15 @@ class CommandSystem(commands.Cog):
 
                 for line in command_lines:
 
-                    if (
-                        len(current_chunk)
-                        + len(line)
-                        + 1
-                        > 1000
-                    ):
+                    if len(
+                        current_chunk
+                    ) + len(line) + 2 > 1024:
 
-                        chunks.append(
-                            current_chunk
-                        )
+                        if current_chunk:
+
+                            chunks.append(
+                                current_chunk
+                            )
 
                         current_chunk = line
 
@@ -423,7 +548,7 @@ class CommandSystem(commands.Cog):
 
                         if current_chunk:
 
-                            current_chunk += "\n"
+                            current_chunk += "\n\n"
 
                         current_chunk += line
 
@@ -439,33 +564,15 @@ class CommandSystem(commands.Cog):
                     field_value
                 ]
 
+            # ------------------------------------------------
+            # ADD FIELDS
+            # ------------------------------------------------
+
             for index, chunk in enumerate(
                 chunks
             ):
 
-                if index == 0:
-
-                    field_name = (
-                        f"📁 {cog_title}"
-                    )
-
-                else:
-
-                    field_name = (
-                        f"📁 {cog_title} "
-                        f"(continued)"
-                    )
-
-                # -------------------------------------------------
-                # EMBED FIELD LIMIT
-                # -------------------------------------------------
-
-                if (
-                    len(current_embed.fields) >= 25
-                    or
-                    len(current_embed) + len(chunk)
-                    > 5900
-                ):
+                if field_count >= 25:
 
                     embeds.append(
                         current_embed
@@ -481,6 +588,21 @@ class CommandSystem(commands.Cog):
                         color=discord.Color.blurple()
                     )
 
+                    field_count = 0
+
+                if index == 0:
+
+                    field_name = (
+                        f"📁 {cog_title}"
+                    )
+
+                else:
+
+                    field_name = (
+                        f"📁 {cog_title} "
+                        "(continued)"
+                    )
+
                 current_embed.add_field(
 
                     name=field_name,
@@ -490,20 +612,21 @@ class CommandSystem(commands.Cog):
                     inline=False
                 )
 
-                command_count += len(
-                    command_lines
-                )
+                field_count += 1
 
-        # -------------------------------------------------
+                total_commands += len(
+                    commands_in_cog
+                ) if index == 0 else 0
+
+        # ----------------------------------------------------
         # FOOTER
-        # -------------------------------------------------
+        # ----------------------------------------------------
 
         current_embed.set_footer(
 
             text=(
-                f"{command_count} commands • "
-                f"Automatically generated from "
-                f"loaded cogs"
+                f"{total_commands} commands • "
+                "Automatically generated"
             )
         )
 
@@ -513,21 +636,21 @@ class CommandSystem(commands.Cog):
 
         return embeds
 
-    # =====================================================
-    # CREATE COMMAND PANEL VIEW
-    # =====================================================
+    # ========================================================
+    # CREATE VIEW
+    # ========================================================
 
-    def create_view(self):
+    def create_panel_view(self):
 
         return CommandPanelView(
             self
         )
 
-    # =====================================================
-    # UPDATE COMMAND PANEL
-    # =====================================================
+    # ========================================================
+    # UPDATE PANEL
+    # ========================================================
 
-    async def update_command_panel(
+    async def update_panel(
         self,
         guild: discord.Guild
     ):
@@ -538,33 +661,38 @@ class CommandSystem(commands.Cog):
 
         if channel is None:
 
+            print(
+                f"❌ Command channel not configured "
+                f"for {guild.name}"
+            )
+
             return False
 
-        guild_config = self.get_guild_config(
+        embeds = self.create_embeds(
             guild
         )
 
-        message_ids = guild_config.get(
-            "command_message_ids",
+        guild_config = self.get_guild_config(
+            guild.id
+        )
+
+        saved_message_ids = guild_config.get(
+            "message_ids",
             []
         )
 
-        embeds = self.create_command_embeds(
-            guild
-        )
-
-        # -------------------------------------------------
-        # TRY TO EDIT EXISTING MESSAGES
-        # -------------------------------------------------
-
         existing_messages = []
 
-        for message_id in message_ids:
+        # ----------------------------------------------------
+        # Fetch old messages
+        # ----------------------------------------------------
+
+        for message_id in saved_message_ids:
 
             try:
 
                 message = await channel.fetch_message(
-                    message_id
+                    int(message_id)
                 )
 
                 existing_messages.append(
@@ -581,21 +709,23 @@ class CommandSystem(commands.Cog):
 
         new_message_ids = []
 
-        # -------------------------------------------------
-        # UPDATE EXISTING
-        # -------------------------------------------------
+        # ----------------------------------------------------
+        # Edit / create
+        # ----------------------------------------------------
 
         for index, embed in enumerate(
             embeds
         ):
 
-            if index < len(
-                existing_messages
-            ):
+            try:
 
-                try:
+                if index < len(
+                    existing_messages
+                ):
 
-                    message = existing_messages[index]
+                    message = existing_messages[
+                        index
+                    ]
 
                     if index == 0:
 
@@ -603,7 +733,7 @@ class CommandSystem(commands.Cog):
 
                             embed=embed,
 
-                            view=self.create_view()
+                            view=self.create_panel_view()
                         )
 
                     else:
@@ -619,13 +749,7 @@ class CommandSystem(commands.Cog):
                         message.id
                     )
 
-                except discord.HTTPException:
-
-                    pass
-
-            else:
-
-                try:
+                else:
 
                     if index == 0:
 
@@ -633,12 +757,13 @@ class CommandSystem(commands.Cog):
 
                             embed=embed,
 
-                            view=self.create_view()
+                            view=self.create_panel_view()
                         )
 
                     else:
 
                         message = await channel.send(
+
                             embed=embed
                         )
 
@@ -646,16 +771,27 @@ class CommandSystem(commands.Cog):
                         message.id
                     )
 
-                except (
-                    discord.Forbidden,
-                    discord.HTTPException
-                ):
+            except discord.Forbidden:
 
-                    return False
+                print(
+                    "❌ Bot does not have permission "
+                    "to send/edit messages."
+                )
 
-        # -------------------------------------------------
-        # DELETE EXTRA OLD MESSAGES
-        # -------------------------------------------------
+                return False
+
+            except discord.HTTPException as e:
+
+                print(
+                    f"❌ Discord error updating "
+                    f"command panel: {e}"
+                )
+
+                return False
+
+        # ----------------------------------------------------
+        # Delete old extra messages
+        # ----------------------------------------------------
 
         if len(existing_messages) > len(
             embeds
@@ -677,34 +813,41 @@ class CommandSystem(commands.Cog):
 
                     pass
 
-        # -------------------------------------------------
-        # SAVE MESSAGE IDS
-        # -------------------------------------------------
+        # ----------------------------------------------------
+        # Save IDs
+        # ----------------------------------------------------
 
         guild_config[
-            "command_message_ids"
+            "message_ids"
         ] = new_message_ids
 
-        self.save_config()
+        save_config(
+            self.config
+        )
+
+        print(
+            f"✅ Command panel updated "
+            f"for {guild.name}"
+        )
 
         return True
 
-    # =====================================================
+    # ========================================================
     # /CMDSETUP
-    # =====================================================
+    # ========================================================
 
     @app_commands.command(
 
         name="cmdsetup",
 
         description=(
-            "Set the channel for the bot command panel."
+            "Set the channel for the bot command list."
         )
     )
     @app_commands.describe(
 
         channel=(
-            "The channel where all bot commands "
+            "Channel where the command list "
             "will be displayed."
         )
     )
@@ -721,9 +864,11 @@ class CommandSystem(commands.Cog):
 
     ):
 
-        guild = interaction.guild
+        # ----------------------------------------------------
+        # SERVER CHECK
+        # ----------------------------------------------------
 
-        if guild is None:
+        if interaction.guild is None:
 
             await interaction.response.send_message(
 
@@ -735,29 +880,37 @@ class CommandSystem(commands.Cog):
 
             return
 
+        guild = interaction.guild
+
+        # ----------------------------------------------------
+        # DEFER
+        # ----------------------------------------------------
+
         await interaction.response.defer(
             ephemeral=True
         )
 
-        # -------------------------------------------------
+        # ----------------------------------------------------
         # SAVE CHANNEL
-        # -------------------------------------------------
+        # ----------------------------------------------------
 
         guild_config = self.get_guild_config(
-            guild
+            guild.id
         )
 
         guild_config[
-            "command_channel_id"
+            "channel_id"
         ] = channel.id
 
-        self.save_config()
+        save_config(
+            self.config
+        )
 
-        # -------------------------------------------------
-        # CREATE PANEL
-        # -------------------------------------------------
+        # ----------------------------------------------------
+        # UPDATE PANEL
+        # ----------------------------------------------------
 
-        success = await self.update_command_panel(
+        success = await self.update_panel(
             guild
         )
 
@@ -765,38 +918,53 @@ class CommandSystem(commands.Cog):
 
             await interaction.followup.send(
 
-                "❌ I couldn't create the command "
-                "panel.\n\n"
-                "Please make sure I have permission "
-                "to **View Channel**, **Send Messages**, "
-                "and **Embed Links** in the selected "
-                "channel.",
+                "❌ **Command setup failed.**\n\n"
+
+                f"I could not create the command panel "
+                f"in {channel.mention}.\n\n"
+
+                "Please check that the bot has:\n"
+                "• View Channel\n"
+                "• Send Messages\n"
+                "• Embed Links\n"
+                "• Read Message History",
 
                 ephemeral=True
             )
 
             return
 
+        # ----------------------------------------------------
+        # SUCCESS
+        # ----------------------------------------------------
+
+        command_count = len(
+            self.get_all_commands()
+        )
+
         await interaction.followup.send(
 
             f"✅ **Command system configured!**\n\n"
-            f"📢 Channel: {channel.mention}\n\n"
-            f"The panel now automatically displays "
-            f"commands from **all loaded cogs**.",
+
+            f"📢 Channel: {channel.mention}\n"
+            f"🤖 Commands detected: `{command_count}`\n\n"
+
+            "The command panel will automatically "
+            "use the bot's registered slash commands.",
 
             ephemeral=True
         )
 
-    # =====================================================
+    # ========================================================
     # /CMD
-    # =====================================================
+    # ========================================================
 
     @app_commands.command(
 
         name="cmd",
 
         description=(
-            "Display all available bot commands."
+            "Refresh and display all bot commands."
         )
     )
     async def cmd(
@@ -807,9 +975,11 @@ class CommandSystem(commands.Cog):
 
     ):
 
-        guild = interaction.guild
+        # ----------------------------------------------------
+        # SERVER CHECK
+        # ----------------------------------------------------
 
-        if guild is None:
+        if interaction.guild is None:
 
             await interaction.response.send_message(
 
@@ -821,9 +991,9 @@ class CommandSystem(commands.Cog):
 
             return
 
-        # -------------------------------------------------
+        # ----------------------------------------------------
         # MODERATOR CHECK
-        # -------------------------------------------------
+        # ----------------------------------------------------
 
         if not is_moderator(
             interaction.user
@@ -838,21 +1008,24 @@ class CommandSystem(commands.Cog):
 
             return
 
-        # -------------------------------------------------
-        # CHECK CHANNEL
-        # -------------------------------------------------
+        # ----------------------------------------------------
+        # CHANNEL CHECK
+        # ----------------------------------------------------
 
-        command_channel = self.get_command_channel(
-            guild
+        command_channel = (
+            self.get_command_channel(
+                interaction.guild
+            )
         )
 
         if command_channel is None:
 
             await interaction.response.send_message(
 
-                "❌ The command channel has not "
+                "❌ The command system has not "
                 "been configured yet.\n\n"
-                "An administrator needs to run:\n"
+
+                "Ask an administrator to use:\n"
                 "`/cmdsetup #channel`",
 
                 ephemeral=True
@@ -860,11 +1033,14 @@ class CommandSystem(commands.Cog):
 
             return
 
-        # -------------------------------------------------
-        # FORCE CORRECT CHANNEL
-        # -------------------------------------------------
+        # ----------------------------------------------------
+        # ONLY USE IN CONFIGURED CHANNEL
+        # ----------------------------------------------------
 
-        if interaction.channel.id != command_channel.id:
+        if (
+            interaction.channel.id
+            != command_channel.id
+        ):
 
             await interaction.response.send_message(
 
@@ -876,26 +1052,25 @@ class CommandSystem(commands.Cog):
 
             return
 
-        # -------------------------------------------------
-        # UPDATE
-        # -------------------------------------------------
+        # ----------------------------------------------------
+        # REFRESH
+        # ----------------------------------------------------
 
         await interaction.response.defer(
             ephemeral=True
         )
 
-        success = await self.update_command_panel(
-            guild
+        success = await self.update_panel(
+            interaction.guild
         )
 
         if success:
 
             await interaction.followup.send(
 
-                "✅ Command list refreshed.\n\n"
-                "The panel has been updated with "
-                "all commands currently registered "
-                "from your bot's cogs.",
+                "✅ **Command list refreshed.**\n\n"
+                "The panel now contains all "
+                "currently registered bot commands.",
 
                 ephemeral=True
             )
@@ -904,14 +1079,15 @@ class CommandSystem(commands.Cog):
 
             await interaction.followup.send(
 
-                "❌ I couldn't update the command panel.",
+                "❌ I couldn't refresh the "
+                "command panel.",
 
                 ephemeral=True
             )
 
-    # =====================================================
-    # ERROR HANDLER
-    # =====================================================
+    # ========================================================
+    # CMDSETUP ERROR
+    # ========================================================
 
     @cmdsetup.error
     async def cmdsetup_error(
@@ -924,12 +1100,14 @@ class CommandSystem(commands.Cog):
 
     ):
 
+        print(
+            f"❌ /cmdsetup error: "
+            f"{repr(error)}"
+        )
+
         if isinstance(
-
             error,
-
             app_commands.errors.MissingPermissions
-
         ):
 
             message = (
@@ -937,52 +1115,61 @@ class CommandSystem(commands.Cog):
                 "permission to use `/cmdsetup`."
             )
 
-        else:
+        elif isinstance(
+            error,
+            app_commands.errors.CommandInvokeError
+        ):
 
-            print(
-                f"CMDSETUP ERROR: {error}"
+            original = getattr(
+                error,
+                "original",
+                error
             )
 
             message = (
                 "❌ An error occurred while "
-                "configuring the command system."
-            )
-
-        if interaction.response.is_done():
-
-            await interaction.followup.send(
-
-                message,
-
-                ephemeral=True
+                "running `/cmdsetup`.\n\n"
+                f"```{original}```"
             )
 
         else:
 
-            await interaction.response.send_message(
-
-                message,
-
-                ephemeral=True
+            message = (
+                "❌ An error occurred while "
+                "running `/cmdsetup`.\n\n"
+                f"```{error}```"
             )
 
-    # =====================================================
-    # COG LOAD
-    # =====================================================
+        try:
 
-    async def cog_load(self):
+            if interaction.response.is_done():
 
-        # Persistent button
-        self.bot.add_view(
-            CommandPanelView(
-                self
+                await interaction.followup.send(
+
+                    message,
+
+                    ephemeral=True
+                )
+
+            else:
+
+                await interaction.response.send_message(
+
+                    message,
+
+                    ephemeral=True
+                )
+
+        except Exception as e:
+
+            print(
+                f"❌ Could not send error response: {e}"
             )
-        )
 
 
-# =========================================================
+# ============================================================
 # COMMAND PANEL VIEW
-# =========================================================
+# ============================================================
 
 class CommandPanelView(
     discord.ui.View
@@ -990,7 +1177,7 @@ class CommandPanelView(
 
     def __init__(
         self,
-        cog
+        cog: CommandSystem
     ):
 
         super().__init__(
@@ -999,9 +1186,9 @@ class CommandPanelView(
 
         self.cog = cog
 
-    # =====================================================
+    # ========================================================
     # REFRESH BUTTON
-    # =====================================================
+    # ========================================================
 
     @discord.ui.button(
 
@@ -1011,9 +1198,9 @@ class CommandPanelView(
 
         style=discord.ButtonStyle.secondary,
 
-        custom_id="command_panel_refresh"
+        custom_id="cmd_panel_refresh"
     )
-    async def refresh(
+    async def refresh_commands(
 
         self,
 
@@ -1023,15 +1210,15 @@ class CommandPanelView(
 
     ):
 
-        # -------------------------------------------------
+        # ----------------------------------------------------
         # SERVER CHECK
-        # -------------------------------------------------
+        # ----------------------------------------------------
 
         if interaction.guild is None:
 
             await interaction.response.send_message(
 
-                "❌ This button can only be used "
+                "❌ This can only be used "
                 "inside a server.",
 
                 ephemeral=True
@@ -1039,9 +1226,9 @@ class CommandPanelView(
 
             return
 
-        # -------------------------------------------------
+        # ----------------------------------------------------
         # MODERATOR CHECK
-        # -------------------------------------------------
+        # ----------------------------------------------------
 
         if not is_moderator(
             interaction.user
@@ -1057,22 +1244,22 @@ class CommandPanelView(
 
             return
 
-        # -------------------------------------------------
+        # ----------------------------------------------------
         # CHANNEL CHECK
-        # -------------------------------------------------
+        # ----------------------------------------------------
 
-        command_channel = (
+        configured_channel = (
             self.cog.get_command_channel(
                 interaction.guild
             )
         )
 
-        if command_channel is None:
+        if configured_channel is None:
 
             await interaction.response.send_message(
 
-                "❌ The command channel is "
-                "not configured.",
+                "❌ The command system has "
+                "not been configured.",
 
                 ephemeral=True
             )
@@ -1081,28 +1268,28 @@ class CommandPanelView(
 
         if (
             interaction.channel.id
-            != command_channel.id
+            != configured_channel.id
         ):
 
             await interaction.response.send_message(
 
-                f"❌ Please use the command panel "
-                f"in {command_channel.mention}.",
+                f"❌ Please use this button in "
+                f"{configured_channel.mention}.",
 
                 ephemeral=True
             )
 
             return
 
-        # -------------------------------------------------
+        # ----------------------------------------------------
         # REFRESH
-        # -------------------------------------------------
+        # ----------------------------------------------------
 
         await interaction.response.defer(
             ephemeral=True
         )
 
-        success = await self.cog.update_command_panel(
+        success = await self.cog.update_panel(
             interaction.guild
         )
 
@@ -1119,18 +1306,20 @@ class CommandPanelView(
 
             await interaction.followup.send(
 
-                "❌ Failed to refresh the "
-                "command list.",
+                "❌ Failed to refresh "
+                "the command list.",
 
                 ephemeral=True
             )
 
 
-# =========================================================
+# ============================================================
 # COG SETUP
-# =========================================================
+# ============================================================
 
-async def setup(bot):
+async def setup(
+    bot: commands.Bot
+):
 
     await bot.add_cog(
         CommandSystem(bot)
