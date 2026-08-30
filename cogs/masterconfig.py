@@ -34,7 +34,7 @@ class MasterConfig(commands.Cog):
                 self.database_url,
                 min_size=1,
                 max_size=5,
-                command_timeout=30
+                command_timeout=30,
                 ssl="require"
             )
 
