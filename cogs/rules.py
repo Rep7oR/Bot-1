@@ -1,3 +1,8 @@
+# ============================================================
+# RULES SYSTEM
+# File: cogs/rules.py
+# ============================================================
+
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -9,19 +14,20 @@ from datetime import datetime, timezone
 
 
 # ============================================================
-# CONFIGURATION
+# SETTINGS
 # ============================================================
 
 CONFIG_FILE = "rules_config.json"
 
-ACCEPT_REACTION = "👍"
+# Mandatory reaction
+REQUIRED_REACTION = "👍"
 
-# Prevent the bot from warning the same member on every message
+# Seconds between warnings for the same member
 WARNING_COOLDOWN = 30
 
 
 # ============================================================
-# JSON HELPERS
+# JSON CONFIGURATION
 # ============================================================
 
 def load_config():
@@ -35,9 +41,9 @@ def load_config():
             CONFIG_FILE,
             "r",
             encoding="utf-8"
-        ) as f:
+        ) as file:
 
-            data = json.load(f)
+            data = json.load(file)
 
             if isinstance(data, dict):
                 return data
@@ -45,7 +51,7 @@ def load_config():
     except Exception as e:
 
         print(
-            f"❌ Failed to load rules config: {e}"
+            f"❌ Rules config load error: {e}"
         )
 
     return {}
@@ -55,23 +61,23 @@ def save_config(data):
 
     try:
 
-        temp_file = CONFIG_FILE + ".tmp"
+        temporary_file = CONFIG_FILE + ".tmp"
 
         with open(
-            temp_file,
+            temporary_file,
             "w",
             encoding="utf-8"
-        ) as f:
+        ) as file:
 
             json.dump(
                 data,
-                f,
+                file,
                 indent=4,
                 ensure_ascii=False
             )
 
         os.replace(
-            temp_file,
+            temporary_file,
             CONFIG_FILE
         )
 
@@ -80,7 +86,7 @@ def save_config(data):
     except Exception as e:
 
         print(
-            f"❌ Failed to save rules config: {e}"
+            f"❌ Rules config save error: {e}"
         )
 
         return False
@@ -96,37 +102,33 @@ class Rules(commands.Cog):
 
         self.bot = bot
 
+        # Load existing configuration
         self.config = load_config()
 
-        # ----------------------------------------------------
-        # Warning cooldown
+        # Warning cooldown storage
         #
         # {
         #     guild_id: {
         #         user_id: timestamp
         #     }
         # }
-        # ----------------------------------------------------
-
+        #
         self.warning_cooldowns = {}
 
-        print(
-            "📜 Rules system loaded."
-        )
+        print("📜 Rules system loaded.")
 
     # ========================================================
-    # CONFIGURATION
+    # GET GUILD CONFIG
     # ========================================================
 
-    def get_guild_config(
-        self,
-        guild_id
-    ):
+    def get_guild_config(self, guild_id):
 
         return self.config.get(
             str(guild_id)
         )
 
+    # ========================================================
+    # SAVE GUILD CONFIG
     # ========================================================
 
     def save_guild_config(
@@ -144,21 +146,7 @@ class Rules(commands.Cog):
         )
 
     # ========================================================
-    # CHECK ADMIN
-    # ========================================================
-
-    def is_admin(
-        self,
-        member
-    ):
-
-        return (
-            member
-            and member.guild_permissions.administrator
-        )
-
-    # ========================================================
-    # GET RULE MESSAGE
+    # GET RULES MESSAGE
     # ========================================================
 
     async def get_rules_message(
@@ -166,18 +154,18 @@ class Rules(commands.Cog):
         guild
     ):
 
-        guild_config = self.get_guild_config(
+        config = self.get_guild_config(
             guild.id
         )
 
-        if not guild_config:
+        if not config:
             return None
 
-        channel_id = guild_config.get(
+        channel_id = config.get(
             "channel_id"
         )
 
-        message_id = guild_config.get(
+        message_id = config.get(
             "message_id"
         )
 
@@ -211,7 +199,7 @@ class Rules(commands.Cog):
             return None
 
     # ========================================================
-    # CHECK REACTION
+    # CHECK IF MEMBER ACCEPTED RULES
     # ========================================================
 
     async def member_accepted_rules(
@@ -220,43 +208,38 @@ class Rules(commands.Cog):
         member
     ):
 
-        # ----------------------------------------------------
-        # Bots are always allowed
-        # ----------------------------------------------------
-
+        # Bots are ignored
         if member.bot:
             return True
 
-        message = await self.get_rules_message(
+        rules_message = await self.get_rules_message(
             guild
         )
 
-        if message is None:
+        if rules_message is None:
             return False
 
         # ----------------------------------------------------
-        # Find the required reaction
+        # Find required 👍 reaction
         # ----------------------------------------------------
 
         required_reaction = None
 
-        for reaction in message.reactions:
+        for reaction in rules_message.reactions:
 
-            if str(reaction.emoji) == ACCEPT_REACTION:
+            if str(
+                reaction.emoji
+            ) == REQUIRED_REACTION:
 
                 required_reaction = reaction
-
                 break
 
-        # ----------------------------------------------------
-        # No reaction exists
-        # ----------------------------------------------------
-
+        # No 👍 reaction exists
         if required_reaction is None:
             return False
 
         # ----------------------------------------------------
-        # Check whether member actually reacted
+        # Check actual Discord reaction
         # ----------------------------------------------------
 
         try:
@@ -264,7 +247,6 @@ class Rules(commands.Cog):
             async for user in required_reaction.users():
 
                 if user.id == member.id:
-
                     return True
 
         except (
@@ -277,7 +259,7 @@ class Rules(commands.Cog):
         return False
 
     # ========================================================
-    # BUILD RULES EMBED
+    # CREATE RULE EMBED
     # ========================================================
 
     def create_rules_embed(
@@ -301,10 +283,11 @@ class Rules(commands.Cog):
 
         embed.add_field(
 
-            name="⚠️ Required Action",
+            name="⚠️ IMPORTANT",
 
             value=(
-                f"React with {ACCEPT_REACTION} "
+
+                f"React with {REQUIRED_REACTION} "
                 "to this message to confirm that "
                 "you have read and accepted the rules."
             ),
@@ -323,7 +306,7 @@ class Rules(commands.Cog):
         return embed
 
     # ========================================================
-    # RULE MODAL
+    # RULE CREATION MODAL
     # ========================================================
 
     class RuleModal(
@@ -371,23 +354,30 @@ class Rules(commands.Cog):
 
             self.channel = channel
 
+        # ====================================================
+        # MODAL SUBMIT
+        # ====================================================
+
         async def on_submit(
             self,
-            interaction
+            interaction: discord.Interaction
         ):
 
+            channel = self.channel
+
             # ------------------------------------------------
-            # Make sure channel still exists
+            # Check channel
             # ------------------------------------------------
 
             if not isinstance(
-                self.channel,
+                channel,
                 discord.TextChannel
             ):
 
                 await interaction.response.send_message(
 
-                    "❌ The selected channel is no longer available.",
+                    "❌ The selected channel is not "
+                    "a normal text channel.",
 
                     ephemeral=True
                 )
@@ -395,32 +385,53 @@ class Rules(commands.Cog):
                 return
 
             # ------------------------------------------------
-            # Check bot permissions
+            # Check permissions
             # ------------------------------------------------
 
-            permissions = (
-                self.channel.permissions_for(
-                    interaction.guild.me
-                )
+            bot_member = interaction.guild.me
+
+            permissions = channel.permissions_for(
+                bot_member
             )
 
-            if not permissions.send_messages:
+            missing = []
 
-                await interaction.response.send_message(
-
-                    "❌ I cannot send messages in that channel.",
-
-                    ephemeral=True
+            if not permissions.view_channel:
+                missing.append(
+                    "View Channel"
                 )
 
-                return
+            if not permissions.send_messages:
+                missing.append(
+                    "Send Messages"
+                )
 
             if not permissions.embed_links:
+                missing.append(
+                    "Embed Links"
+                )
+
+            if not permissions.add_reactions:
+                missing.append(
+                    "Add Reactions"
+                )
+
+            if not permissions.read_message_history:
+                missing.append(
+                    "Read Message History"
+                )
+
+            if missing:
 
                 await interaction.response.send_message(
 
-                    "❌ I need the **Embed Links** permission "
-                    "in that channel.",
+                    "❌ I cannot use that channel.\n\n"
+
+                    "**Missing permissions:**\n"
+                    + "\n".join(
+                        f"• {permission}"
+                        for permission in missing
+                    ),
 
                     ephemeral=True
                 )
@@ -428,7 +439,7 @@ class Rules(commands.Cog):
                 return
 
             # ------------------------------------------------
-            # Create embed
+            # Create rules embed
             # ------------------------------------------------
 
             embed = self.cog.create_rules_embed(
@@ -443,12 +454,12 @@ class Rules(commands.Cog):
             )
 
             # ------------------------------------------------
-            # Send rules
+            # Post rules
             # ------------------------------------------------
 
             try:
 
-                message = await self.channel.send(
+                rules_message = await channel.send(
                     embed=embed
                 )
 
@@ -456,7 +467,7 @@ class Rules(commands.Cog):
 
                 await interaction.response.send_message(
 
-                    f"❌ Failed to post the rules.\n"
+                    "❌ Failed to post the rules.\n\n"
                     f"`{type(e).__name__}: {e}`",
 
                     ephemeral=True
@@ -465,25 +476,25 @@ class Rules(commands.Cog):
                 return
 
             # ------------------------------------------------
-            # Add mandatory reaction
+            # Add mandatory 👍 reaction
             # ------------------------------------------------
 
             try:
 
-                await message.add_reaction(
-                    ACCEPT_REACTION
+                await rules_message.add_reaction(
+                    REQUIRED_REACTION
                 )
 
             except Exception as e:
 
                 # ------------------------------------------------
-                # Delete message if reaction cannot be added
-                # because mandatory reaction is required.
+                # Reaction is mandatory.
+                # If bot cannot add it, delete rules message.
                 # ------------------------------------------------
 
                 try:
 
-                    await message.delete()
+                    await rules_message.delete()
 
                 except Exception:
 
@@ -491,10 +502,12 @@ class Rules(commands.Cog):
 
                 await interaction.response.send_message(
 
-                    "❌ I could not add the required "
-                    f"{ACCEPT_REACTION} reaction.\n\n"
-                    "Make sure I have the **Add Reactions** "
-                    "permission in the selected channel.",
+                    "❌ I could not add the mandatory "
+                    f"{REQUIRED_REACTION} reaction.\n\n"
+
+                    "Please make sure I have the "
+                    "**Add Reactions** permission "
+                    "in that channel.",
 
                     ephemeral=True
                 )
@@ -505,11 +518,11 @@ class Rules(commands.Cog):
             # Save configuration
             # ------------------------------------------------
 
-            config = {
+            configuration = {
 
-                "channel_id": self.channel.id,
+                "channel_id": channel.id,
 
-                "message_id": message.id,
+                "message_id": rules_message.id,
 
                 "title": str(
                     self.rule_title.value
@@ -519,31 +532,34 @@ class Rules(commands.Cog):
                     self.rule_content.value
                 ),
 
-                "required_reaction": ACCEPT_REACTION,
+                "required_reaction": REQUIRED_REACTION,
 
                 "created_by": interaction.user.id,
 
-                "created_at": (
-                    datetime.now(
-                        timezone.utc
-                    ).isoformat()
-                )
+                "created_at": datetime.now(
+                    timezone.utc
+                ).isoformat()
             }
 
             saved = self.cog.save_guild_config(
 
                 interaction.guild.id,
 
-                config
+                configuration
             )
+
+            # ------------------------------------------------
+            # Configuration save failed
+            # ------------------------------------------------
 
             if not saved:
 
                 await interaction.response.send_message(
 
-                    "⚠️ Rules were posted and the reaction "
-                    "was added, but I could not save the "
-                    "configuration file.",
+                    "⚠️ Rules were posted successfully, "
+                    "but I could not save the configuration.\n\n"
+
+                    "Please check the bot's file permissions.",
 
                     ephemeral=True
                 )
@@ -556,15 +572,15 @@ class Rules(commands.Cog):
 
             await interaction.response.send_message(
 
-                "✅ **Rules posted successfully!**\n\n"
+                "✅ **Server rules created successfully!**\n\n"
 
-                f"📍 Channel: {self.channel.mention}\n"
+                f"📍 Channel: {channel.mention}\n"
 
-                f"📝 Title: **{self.rule_title.value}**\n"
+                f"📜 Title: **{self.rule_title.value}**\n"
 
-                f"👍 Required reaction: {ACCEPT_REACTION}\n\n"
+                f"👍 Required reaction: {REQUIRED_REACTION}\n\n"
 
-                "Members must react to this rules message "
+                "Members must react to the rules message "
                 "before participating in the server.",
 
                 ephemeral=True
@@ -592,33 +608,53 @@ class Rules(commands.Cog):
 
             self.author = author
 
-            self.selected_channel = None
+            # ------------------------------------------------
+            # IMPORTANT:
+            # Create ChannelSelect here and add it manually.
+            # ------------------------------------------------
 
-        # ----------------------------------------------------
-        # Channel selector
-        # ----------------------------------------------------
+            self.channel_select = discord.ui.ChannelSelect(
 
-        channel_select = discord.ui.ChannelSelect(
+                placeholder=(
+                    "📢 Select the rules text channel"
+                ),
 
-            placeholder="Select the rules channel",
+                channel_types=[
+                    discord.ChannelType.text
+                ],
 
-            channel_types=[
-                discord.ChannelType.text
-            ],
+                min_values=1,
 
-            min_values=1,
+                max_values=1
+            )
 
-            max_values=1
-        )
+            # ------------------------------------------------
+            # Attach callback
+            # ------------------------------------------------
 
-        @channel_select.callback
+            self.channel_select.callback = (
+                self.channel_selected
+            )
+
+            # ------------------------------------------------
+            # Add selector to View
+            # ------------------------------------------------
+
+            self.add_item(
+                self.channel_select
+            )
+
+        # ====================================================
+        # CHANNEL SELECTED
+        # ====================================================
+
         async def channel_selected(
             self,
-            interaction
+            interaction: discord.Interaction
         ):
 
             # ------------------------------------------------
-            # Only command user
+            # Only original admin
             # ------------------------------------------------
 
             if interaction.user.id != self.author.id:
@@ -626,7 +662,7 @@ class Rules(commands.Cog):
                 await interaction.response.send_message(
 
                     "❌ This setup menu belongs to "
-                    "the administrator who opened it.",
+                    "another administrator.",
 
                     ephemeral=True
                 )
@@ -634,10 +670,25 @@ class Rules(commands.Cog):
                 return
 
             # ------------------------------------------------
-            # Get selected channel
+            # Check selection
             # ------------------------------------------------
 
+            if not self.channel_select.values:
+
+                await interaction.response.send_message(
+
+                    "❌ Please select a channel.",
+
+                    ephemeral=True
+                )
+
+                return
+
             channel = self.channel_select.values[0]
+
+            # ------------------------------------------------
+            # Verify text channel
+            # ------------------------------------------------
 
             if not isinstance(
                 channel,
@@ -646,20 +697,73 @@ class Rules(commands.Cog):
 
                 await interaction.response.send_message(
 
-                    "❌ Please select a normal text channel.",
+                    "❌ Please select a normal "
+                    "text channel.",
 
                     ephemeral=True
                 )
 
                 return
 
-            self.selected_channel = channel
-
             # ------------------------------------------------
-            # Show modal
+            # Check bot permissions
             # ------------------------------------------------
 
-            modal = Rules.RuleModal(
+            bot_member = interaction.guild.me
+
+            permissions = channel.permissions_for(
+                bot_member
+            )
+
+            missing = []
+
+            if not permissions.view_channel:
+                missing.append(
+                    "View Channel"
+                )
+
+            if not permissions.send_messages:
+                missing.append(
+                    "Send Messages"
+                )
+
+            if not permissions.embed_links:
+                missing.append(
+                    "Embed Links"
+                )
+
+            if not permissions.add_reactions:
+                missing.append(
+                    "Add Reactions"
+                )
+
+            if not permissions.read_message_history:
+                missing.append(
+                    "Read Message History"
+                )
+
+            if missing:
+
+                await interaction.response.send_message(
+
+                    "❌ I cannot use that channel.\n\n"
+
+                    "**Missing permissions:**\n"
+                    + "\n".join(
+                        f"• {permission}"
+                        for permission in missing
+                    ),
+
+                    ephemeral=True
+                )
+
+                return
+
+            # ------------------------------------------------
+            # Open rules form
+            # ------------------------------------------------
+
+            modal = self.cog.RuleModal(
 
                 self.cog,
 
@@ -690,6 +794,10 @@ class Rules(commands.Cog):
         interaction: discord.Interaction
     ):
 
+        # ----------------------------------------------------
+        # Server only
+        # ----------------------------------------------------
+
         if interaction.guild is None:
 
             await interaction.response.send_message(
@@ -703,7 +811,7 @@ class Rules(commands.Cog):
             return
 
         # ----------------------------------------------------
-        # Show channel selector
+        # Create selector
         # ----------------------------------------------------
 
         view = self.RuleChannelView(
@@ -713,15 +821,22 @@ class Rules(commands.Cog):
             interaction.user
         )
 
+        # ----------------------------------------------------
+        # Send private setup menu
+        # ----------------------------------------------------
+
         await interaction.response.send_message(
 
             "📜 **Server Rules Setup**\n\n"
 
-            "Select the **text channel** where you want "
-            "the rules message to be posted.\n\n"
+            "Select the **text channel** where you "
+            "want the rules message to be posted.\n\n"
+
+            "After selecting the channel, a form will "
+            "open where you can enter your rules.\n\n"
 
             f"Members will be required to react with "
-            f"{ACCEPT_REACTION} to participate.",
+            f"{REQUIRED_REACTION} to participate.",
 
             view=view,
 
@@ -768,8 +883,7 @@ class Rules(commands.Cog):
 
             await interaction.response.send_message(
 
-                "⚪ No rules configuration exists "
-                "for this server.",
+                "⚪ Rules are not configured.",
 
                 ephemeral=True
             )
@@ -780,18 +894,30 @@ class Rules(commands.Cog):
             guild_id
         ]
 
-        save_config(
+        saved = save_config(
             self.config
         )
 
-        await interaction.response.send_message(
+        if saved:
 
-            "✅ Rules configuration removed.\n\n"
+            await interaction.response.send_message(
 
-            "⚠️ The existing rules message was not deleted.",
+                "✅ Rules configuration removed.\n\n"
 
-            ephemeral=True
-        )
+                "⚠️ The existing rules message was "
+                "not deleted.",
+
+                ephemeral=True
+            )
+
+        else:
+
+            await interaction.response.send_message(
+
+                "❌ Configuration could not be saved.",
+
+                ephemeral=True
+            )
 
     # ========================================================
     # /RULESTATUS
@@ -851,65 +977,104 @@ class Rules(commands.Cog):
             )
         )
 
-        message = await self.get_rules_message(
+        rules_message = await self.get_rules_message(
+
             interaction.guild
         )
 
+        # ----------------------------------------------------
+        # Create status embed
+        # ----------------------------------------------------
+
         embed = discord.Embed(
 
-            title="📜 Rules Configuration",
+            title="📜 Rules Status",
 
-            color=discord.Color.blurple()
+            color=discord.Color.blurple(),
+
+            timestamp=datetime.now(
+                timezone.utc
+            )
         )
 
+        # Status
+        if rules_message:
+
+            embed.add_field(
+
+                name="Status",
+
+                value="🟢 Active",
+
+                inline=False
+            )
+
+        else:
+
+            embed.add_field(
+
+                name="Status",
+
+                value=(
+                    "🔴 Rules message not found"
+                ),
+
+                inline=False
+            )
+
+        # Channel
         embed.add_field(
 
-            name="Status",
-
-            value=(
-                "🟢 Active"
-                if message
-                else "🔴 Rules message not found"
-            ),
-
-            inline=False
-        )
-
-        embed.add_field(
-
-            name="Channel",
+            name="Rules Channel",
 
             value=(
                 channel.mention
                 if channel
-                else "⚠️ Channel not found"
+                else "❌ Channel not found"
             ),
 
             inline=True
         )
 
+        # Reaction
         embed.add_field(
 
             name="Required Reaction",
 
-            value=ACCEPT_REACTION,
+            value=REQUIRED_REACTION,
 
             inline=True
         )
 
-        embed.add_field(
+        # Message
+        if rules_message:
 
-            name="Message",
+            embed.add_field(
 
-            value=(
-                f"[Jump to Rules Message]"
-                f"({message.jump_url})"
-                if message
-                else "Message not found"
-            ),
+                name="Rules Message",
 
-            inline=False
-        )
+                value=(
+                    f"[Jump to Rules Message]"
+                    f"({rules_message.jump_url})"
+                ),
+
+                inline=False
+            )
+
+        else:
+
+            embed.add_field(
+
+                name="Rules Message",
+
+                value="❌ Message not found",
+
+                inline=False
+            )
+
+        # ----------------------------------------------------
+        # Send
+        # ----------------------------------------------------
 
         await interaction.response.send_message(
 
@@ -925,7 +1090,7 @@ class Rules(commands.Cog):
     @commands.Cog.listener()
     async def on_message(
         self,
-        message
+        message: discord.Message
     ):
 
         # ----------------------------------------------------
@@ -943,7 +1108,7 @@ class Rules(commands.Cog):
             return
 
         # ----------------------------------------------------
-        # Ignore messages from admins
+        # Ignore administrators
         # ----------------------------------------------------
 
         if (
@@ -952,10 +1117,11 @@ class Rules(commands.Cog):
             return
 
         # ----------------------------------------------------
-        # Check whether rules are configured
+        # Get configuration
         # ----------------------------------------------------
 
         config = self.get_guild_config(
+
             message.guild.id
         )
 
@@ -963,7 +1129,7 @@ class Rules(commands.Cog):
             return
 
         # ----------------------------------------------------
-        # Check rules message
+        # Get rules message
         # ----------------------------------------------------
 
         rules_message = await self.get_rules_message(
@@ -972,23 +1138,21 @@ class Rules(commands.Cog):
         )
 
         if rules_message is None:
+            return
+
+        # ----------------------------------------------------
+        # Don't warn inside rules channel
+        # ----------------------------------------------------
+
+        if (
+            message.channel.id
+            == rules_message.channel.id
+        ):
 
             return
 
         # ----------------------------------------------------
-        # If this IS the rules message channel,
-        # don't warn people for talking there.
-        #
-        # This prevents the bot from fighting with
-        # the rules channel itself.
-        # ----------------------------------------------------
-
-        if message.channel.id == rules_message.channel.id:
-
-            return
-
-        # ----------------------------------------------------
-        # Check actual reaction
+        # Check actual 👍 reaction
         # ----------------------------------------------------
 
         accepted = await self.member_accepted_rules(
@@ -999,7 +1163,6 @@ class Rules(commands.Cog):
         )
 
         if accepted:
-
             return
 
         # ----------------------------------------------------
@@ -1010,13 +1173,15 @@ class Rules(commands.Cog):
 
         user_id = message.author.id
 
-        now = asyncio.get_running_loop().time()
+        current_time = (
+            asyncio.get_running_loop().time()
+        )
 
-        guild_cooldowns = self.warning_cooldowns.setdefault(
-
-            guild_id,
-
-            {}
+        guild_cooldowns = (
+            self.warning_cooldowns.setdefault(
+                guild_id,
+                {}
+            )
         )
 
         last_warning = guild_cooldowns.get(
@@ -1025,7 +1190,7 @@ class Rules(commands.Cog):
         )
 
         if (
-            now - last_warning
+            current_time - last_warning
             < WARNING_COOLDOWN
         ):
 
@@ -1033,31 +1198,26 @@ class Rules(commands.Cog):
 
         guild_cooldowns[
             user_id
-        ] = now
+        ] = current_time
 
         # ----------------------------------------------------
-        # Find rules channel
-        # ----------------------------------------------------
-
-        rules_channel = rules_message.channel
-
-        # ----------------------------------------------------
-        # Warning
+        # Send warning
         # ----------------------------------------------------
 
         try:
 
-            warning = await message.channel.send(
+            await message.channel.send(
 
                 f"⚠️ {message.author.mention} "
                 "you must read and accept the server "
-                f"rules before participating.\n\n"
+                "rules before participating.\n\n"
 
-                f"Please react with {ACCEPT_REACTION} "
-                f"to the rules message in "
-                f"{rules_channel.mention}.\n\n"
+                f"Please react with {REQUIRED_REACTION} "
+                "to the rules message in "
+                f"{rules_message.channel.mention}.\n\n"
 
-                f"[Go to Rules]({rules_message.jump_url})",
+                f"[📜 Go to Rules]"
+                f"({rules_message.jump_url})",
 
                 delete_after=10
             )
@@ -1067,16 +1227,16 @@ class Rules(commands.Cog):
             discord.HTTPException
         ):
 
-            return
+            pass
 
     # ========================================================
-    # RAW REACTION LISTENER
+    # REACTION ADDED
     # ========================================================
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(
         self,
-        payload
+        payload: discord.RawReactionActionEvent
     ):
 
         # ----------------------------------------------------
@@ -1090,10 +1250,15 @@ class Rules(commands.Cog):
         # Ignore bot reactions
         # ----------------------------------------------------
 
-        if payload.member and payload.member.bot:
+        if payload.user_id == self.bot.user.id:
             return
 
+        # ----------------------------------------------------
+        # Get config
+        # ----------------------------------------------------
+
         config = self.get_guild_config(
+
             payload.guild_id
         )
 
@@ -1101,7 +1266,7 @@ class Rules(commands.Cog):
             return
 
         # ----------------------------------------------------
-        # Check message
+        # Check rules message
         # ----------------------------------------------------
 
         rules_message_id = config.get(
@@ -1118,49 +1283,24 @@ class Rules(commands.Cog):
             return
 
         # ----------------------------------------------------
-        # Only 👍 counts
+        # Only 👍 is accepted
         # ----------------------------------------------------
 
         if str(
             payload.emoji
-        ) != ACCEPT_REACTION:
+        ) != REQUIRED_REACTION:
 
             return
 
         # ----------------------------------------------------
-        # Accepted
+        # Clear warning cooldown
         # ----------------------------------------------------
 
-        guild = self.bot.get_guild(
-            payload.guild_id
-        )
-
-        if guild is None:
-            return
-
-        member = payload.member
-
-        if member is None:
-
-            try:
-
-                member = await guild.fetch_member(
-                    payload.user_id
-                )
-
-            except Exception:
-
-                return
-
-        # ----------------------------------------------------
-        # Remove cooldown
-        # ----------------------------------------------------
-
-        guild_cooldowns = self.warning_cooldowns.get(
-
-            payload.guild_id,
-
-            {}
+        guild_cooldowns = (
+            self.warning_cooldowns.get(
+                payload.guild_id,
+                {}
+            )
         )
 
         guild_cooldowns.pop(
@@ -1168,26 +1308,51 @@ class Rules(commands.Cog):
             None
         )
 
-        print(
+        # ----------------------------------------------------
+        # Log
+        # ----------------------------------------------------
 
-            f"📜 {member} accepted the server rules "
-            f"in {guild.name}."
+        guild = self.bot.get_guild(
+            payload.guild_id
         )
 
+        if guild:
+
+            member = guild.get_member(
+                payload.user_id
+            )
+
+            if member:
+
+                print(
+
+                    f"📜 {member} accepted "
+                    f"the rules in {guild.name}."
+                )
+
     # ========================================================
-    # RAW REACTION REMOVE
+    # REACTION REMOVED
     # ========================================================
 
     @commands.Cog.listener()
     async def on_raw_reaction_remove(
         self,
-        payload
+        payload: discord.RawReactionActionEvent
     ):
+
+        # ----------------------------------------------------
+        # Ignore DMs
+        # ----------------------------------------------------
 
         if payload.guild_id is None:
             return
 
+        # ----------------------------------------------------
+        # Get config
+        # ----------------------------------------------------
+
         config = self.get_guild_config(
+
             payload.guild_id
         )
 
@@ -1201,6 +1366,10 @@ class Rules(commands.Cog):
         if not rules_message_id:
             return
 
+        # ----------------------------------------------------
+        # Check rules message
+        # ----------------------------------------------------
+
         if payload.message_id != int(
             rules_message_id
         ):
@@ -1208,28 +1377,23 @@ class Rules(commands.Cog):
             return
 
         # ----------------------------------------------------
-        # Only required reaction matters
+        # Only 👍 matters
         # ----------------------------------------------------
 
         if str(
             payload.emoji
-        ) != ACCEPT_REACTION:
+        ) != REQUIRED_REACTION:
 
             return
 
-        # ----------------------------------------------------
-        # The member is automatically unaccepted because
-        # we check the actual reaction every time they speak.
-        # ----------------------------------------------------
-
         print(
 
-            f"⚠️ User {payload.user_id} removed "
-            "their rules reaction."
+            f"⚠️ User {payload.user_id} "
+            "removed their rules reaction."
         )
 
     # ========================================================
-    # ERROR HANDLER
+    # RULE COMMAND ERROR
     # ========================================================
 
     @rule.error
@@ -1245,8 +1409,8 @@ class Rules(commands.Cog):
         ):
 
             message = (
-                "❌ You need Administrator permission "
-                "to use `/rule`."
+                "❌ You need **Administrator** "
+                "permission to use `/rule`."
             )
 
         else:
@@ -1256,8 +1420,8 @@ class Rules(commands.Cog):
             )
 
             message = (
-                "❌ An error occurred while opening "
-                "the rules setup."
+                "❌ An error occurred while "
+                "opening the rules setup."
             )
 
         try:
@@ -1289,14 +1453,12 @@ class Rules(commands.Cog):
 # SETUP
 # ============================================================
 
-async def setup(
-    bot
-):
+async def setup(bot):
 
     await bot.add_cog(
         Rules(bot)
     )
 
     print(
-        "✅ Rules Cog loaded."
+        "✅ Rules Cog loaded successfully."
     )
